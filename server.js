@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+require('dotenv').config();
 
 const requestLogger = require(path.join(__dirname, 'middleware', 'log'));
 
@@ -26,6 +27,6 @@ app.use('/api', require('./routes/authRoute'));
 app.use('/api', require('./routes/homeRoute'));
 
 
-app.listen(3000, '0.0.0.0', () => {
+app.listen(process.env.PORT, '0.0.0.0', () => {
     console.log('Server PlanToday running');
 });
