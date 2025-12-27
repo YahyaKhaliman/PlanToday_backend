@@ -18,7 +18,7 @@ app.use((req, res, next) => {
     return requestLogger(req, res, next);
 });
 
-app.get('/api', (req, res) => {
+app.get('/api-plantoday', (req, res) => {
     res.send('PlanToday Backend Running');
 });
 
