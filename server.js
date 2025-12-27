@@ -23,7 +23,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api', require('./routes/authRoute'));
 app.use('/api', require('./routes/homeRoute'));
 
-app.get('/', (req, res) => {
+app.get('/api', (req, res) => {
     res.send('PlanToday Backend Running');
 });
 
