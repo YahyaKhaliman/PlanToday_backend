@@ -19,7 +19,9 @@ app.use((req, res, next) => {
 });
 
 app.use(express.urlencoded({ extended: true }));
-
+app.get('/health', (req, res) => {
+    res.status(200).send('OK - PlanToday Backend Running');
+});
 app.use('/api', require('./routes/authRoute'));
 app.use('/api', require('./routes/homeRoute'));
 
