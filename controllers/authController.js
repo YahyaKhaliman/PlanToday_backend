@@ -120,7 +120,6 @@ const register = async (req, res) => {
 
 const checkDevice = async (req, res) => {
   const { deviceId } = req.body;
-  console.debug(req.body)
   if (!deviceId) {
     return res.status(400).json({
       success: false,
