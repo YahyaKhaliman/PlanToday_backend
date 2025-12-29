@@ -9,7 +9,7 @@ router.post('/calon-customer', homeController.calonCustomer);
 // Visit Plan
 router.get('/cabang', homeController.getCabang);
 router.post('/visit-plan', homeController.createVisitPlan);
-router.get('/cariCustomer', homeController.cariCustomer)
+router.get('/cari-customer', homeController.cariCustomer)
 
 // Visit
 router.post('/visits', homeController.createVisit);
