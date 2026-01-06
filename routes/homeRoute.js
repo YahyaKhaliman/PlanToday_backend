@@ -5,6 +5,7 @@ const homeController = require('../controllers/homeController');
 
 // Calon customer
 router.post('/calon-customer', homeController.calonCustomer);
+router.put('/update-customer/:cc_kode', homeController.updateCalonCustomerByKode)
 
 // Visit Plan
 router.get('/cabang', homeController.getCabang);
@@ -20,18 +21,20 @@ router.post('/visits/:id/photo', (req, res, next) => {
     next();
   });
 }, homeController.uploadVisitPhoto);
-
-// Rekap visit
+// Rekap Visit
 router.get('/rekap-visit', homeController.getRekapVisit)
 router.get('/rekap-visit/wa', homeController.rekapVisitWA)
 router.put('/update-rekap-visit/:id', homeController.updateRekapVisit)
+router.get('/visit/from-plan', homeController.getVisitFromPlan);
+router.get('/visit/draft', homeController.getVisitDraft);
 
-// Rekap Visit Plan
+// Visit Plan
 router.get('/rekap-visit-detail', homeController.visitPlanById)
 router.get('/rekap-visit-plan', homeController.getRekapVisitPlan)
 router.get('/rekap-visit-plan/wa', homeController.rekapVisitPlanWA)
+router.put('/visit-plan/:id', homeController.updateVisitPlan)
 
-// Rekap Calon Customer
+// Calon Customer
 router.get('/rekap-calon-customer', homeController.getRekapCalonCustomer)
 router.get('/rekap-calon-customer/wa', homeController.rekapCalonCustomerWA)
 
