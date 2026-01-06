@@ -196,7 +196,6 @@ const cariCustomer = async (req, res) => {
     }
 
     const like = `%${search}%`;
-
     const [rows] = await db.query(
     `
     SELECT
@@ -211,29 +210,29 @@ const cariCustomer = async (req, res) => {
     FROM (
         -- 1) Calon customer
         SELECT
-        cc_id    AS id,
-        cc_kode  AS cc_kode,
-        cc_nama  AS cc_nama,
-        cc_alamat AS cc_alamat,
-        cc_cp    AS cc_cp,
-        cc_telp  AS cc_telp,
-        cc_kota  AS cc_kota,
-        'CALONCUSTOMER' AS sumber
+        CONCAT('CALON-', cc_id)                AS id,
+        cc_kode                               AS cc_kode,
+        cc_nama                               AS cc_nama,
+        cc_alamat                             AS cc_alamat,
+        cc_cp                                 AS cc_cp,
+        cc_telp                               AS cc_telp,
+        cc_kota                               AS cc_kota,
+        'CALONCUSTOMER'                       AS sumber
         FROM tcaloncustomer
         WHERE cc_nama LIKE ?
 
         UNION ALL
 
-        -- 2) Customer aktif (sesuaikan nama kolom tabel kamu)
+        -- 2) Customer aktif
         SELECT
-        cus_kodei     AS id,
-        cus_kode   AS cc_kode,
-        cus_nama   AS cc_nama,
-        cus_alamat AS cc_alamat,
-        cus_cp     AS cc_cp,
-        cus_telp   AS cc_telp,
-        cus_kota   AS cc_kota,
-        'CUSTOMER' AS sumber
+        CONCAT('CUSTOMER-', NULLIF(cus_kode, '')) AS id,
+        cus_kode                                   AS cc_kode,
+        cus_nama                                   AS cc_nama,
+        cus_alamat                                 AS cc_alamat,
+        cus_cp                                     AS cc_cp,
+        cus_telp                                   AS cc_telp,
+        cus_kota                                   AS cc_kota,
+        'CUSTOMER'                                 AS sumber
         FROM tcustomer
         WHERE cus_nama LIKE ?
     ) x
