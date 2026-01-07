@@ -1082,7 +1082,7 @@ const rekapCalonCustomerWA = async (req, res) => {
     if (!keyword) {
         return res.status(400).json({
         success: false,
-        message: "Tentukan Nama Customer (agar tidak semua data terkirim)",
+        message: "Tentukan Nama Customer \n(agar tidak semua data terkirim)",
         });
     }
 
