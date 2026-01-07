@@ -1093,9 +1093,6 @@ const rekapCalonCustomerWA = async (req, res) => {
         const like = `%${keyword}%`;
         const cab = String(cabang || "").trim(); // optional
 
-        // NOTE:
-        // Kalau cabang diisi -> filter by kota/cabang pada kedua tabel
-        // Kalau cabang kosong -> tidak pakai filter kota/cabang
         let query = `
         SELECT
             x.id,
