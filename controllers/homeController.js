@@ -1,5 +1,4 @@
-const db = require('../config/database');
-
+const db = require('../config/dbMain');
 
 function safe(v, fallback = '-') {
     if (v === null || v === undefined) return fallback;

@@ -1,4 +1,4 @@
-const db = require('../config/database');
+const db = require('../config/dbMain');
 
 const login = async (req, res) => {
   const { username, password, deviceId, versiApp } = req.body;

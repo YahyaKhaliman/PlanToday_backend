@@ -23,9 +23,9 @@ app.get('/api-plantoday', (req, res) => {
     res.send('PlanToday Backend Running');
 });
 
+app.use('/api', require('./routes/achRoute'));
 app.use('/api', require('./routes/authRoute'));
 app.use('/api', require('./routes/homeRoute'));
-
 
 app.listen(process.env.PORT, '0.0.0.0',  () => {
     console.log(`Server PlanToday running in: ${process.env.PORT}`);
