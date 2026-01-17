@@ -49,7 +49,6 @@ const getAchievementRange = async (req, res) => {
 
         const { fy, fm, ty, tm } = normalizeRange(fromYear, fromMonth, toYear, toMonth);
 
-        // ===== role check =====
         const role = String(req.user?.jabatan || '').toUpperCase(); // sesuaikan sumber auth kamu
         const isManager = role === 'MANAGER';
 
@@ -63,7 +62,7 @@ const getAchievementRange = async (req, res) => {
         if (!selfKode) {
             return res.status(404).json({
             success: false,
-            message: `User "${loginName}" tidak ditemukan di data achievement`,
+            message: `User "${req.user?.nama}" tidak ditemukan di data achievement`,
             });
         }
         }
