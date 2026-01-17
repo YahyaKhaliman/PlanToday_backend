@@ -48,7 +48,7 @@ const getAchievementRange = async (req, res) => {
         const { fy, fm, ty, tm } = normalizeRange(fromYear, fromMonth, toYear, toMonth);
 
         const sql = `
-        SELECT 
+        SELECT
             v.kode,
             MAX(v.nik) AS nik,
             MAX(v.nama) AS nama,
@@ -56,11 +56,12 @@ const getAchievementRange = async (req, res) => {
 
             CAST(ROUND(SUM(v.target), 0) AS UNSIGNED)      AS target,
             CAST(ROUND(SUM(v.realisasi), 0) AS UNSIGNED)   AS realisasi,
-            CASE 
+            CASE
             WHEN COALESCE(SUM(v.target), 0) = 0 THEN 0
             ELSE ROUND((COALESCE(SUM(v.realisasi), 0) / COALESCE(SUM(v.target), 0)) * 100, 2)
             END AS ach
-        FROM kpi_lokal.v_mkt_omset v
+        FROM kpi.v_mkt_omset v
+        FROM kpi.v_mkt_omset v
         WHERE
             (
             v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?)
@@ -111,7 +112,7 @@ const allData = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            data: rows, 
+            data: rows,
         });
     } catch (err) {
         console.error('GET ACHIEVEMENT OMSET ERROR:', err);
@@ -126,15 +127,15 @@ const allData = async (req, res) => {
 const getOmsetByMonth = async (req, res) => {
     try {
         const kode = String(req.params.id || req.user?.kode || '').trim()
-        
-        if (!kode) 
-            return res.status(400).json({ 
-        success:false, message:'kode tidak terdeteksi' 
+
+        if (!kode)
+            return res.status(400).json({
+        success:false, message:'kode tidak terdeteksi'
         });
 
         const [nameRows] = await db.query(
         `SELECT MAX(nama) AS nama
-        FROM kpi_lokal.v_mkt_omset
+        FROM kpi.v_mkt_omset
         WHERE kode = ?`,
         [kode]
         );
@@ -165,7 +166,7 @@ const getOmsetByMonth = async (req, res) => {
             CAST(ROUND(SUM(target), 0) AS UNSIGNED)      AS target,
             CAST(ROUND(SUM(realisasi), 0) AS UNSIGNED)   AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi_lokal.v_mkt_omset
+        FROM kpi.v_mkt_omset
         ${where}
         GROUP BY tahun, bulan
         ORDER BY tahun, bulan
@@ -192,15 +193,15 @@ const getOmsetByMonth = async (req, res) => {
 const getOmsetByYear = async (req, res) => {
     try {
         const kode = String(req.params.id || req.user?.kode || '').trim()
-        
-        if (!kode) 
-            return res.status(400).json({ 
-        success:false, message:'kode tidak terdeteksi' 
+
+        if (!kode)
+            return res.status(400).json({
+        success:false, message:'kode tidak terdeteksi'
         });
 
         const [nameRows] = await db.query(
         `SELECT MAX(nama) AS nama
-        FROM kpi_lokal.v_mkt_omset
+        FROM kpi.v_mkt_omset
         WHERE kode = ?`,
         [kode]
         );
@@ -212,7 +213,7 @@ const getOmsetByYear = async (req, res) => {
             SUM(target) AS target,
             SUM(realisasi) AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi_lokal.v_mkt_omset
+        FROM kpi.v_mkt_omset
         WHERE kode = ?
         GROUP BY tahun
         ORDER BY tahun;
@@ -253,7 +254,7 @@ const getAchievementOmset = async (req, res) => {
         // base query
         let sql = `
         SELECT
-            kpi_lokal,
+            kpi,
             kode,
             nik,
             nama,
@@ -408,10 +409,10 @@ const getSpkOmsetByMonth = async (req, res) => {
 };
 
 module.exports = {
-    allData, 
+    allData,
     getOmsetByMonth,
     getOmsetByYear,
     getAchievementRange,
     getSpkOmsetByMonth,
-    getAchievementOmset  
+    getAchievementOmset
 };
