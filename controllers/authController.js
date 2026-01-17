@@ -1,4 +1,11 @@
 const db = require('../config/dbMain');
+const jwt = require('jsonwebtoken');
+
+const token = jwt.sign(
+  { id: user.id },
+  process.env.JWT_SECRET,
+  { expiresIn: '7d' }
+);
 
 const login = async (req, res) => {
   const { username, password, deviceId, versiApp } = req.body;
@@ -11,7 +18,7 @@ const login = async (req, res) => {
   }
 
   try {
-    // Autentikasi User 
+    // Autentikasi User
     const [rows] = await db.query(
       `SELECT *
         FROM tkaryawan
@@ -75,18 +82,18 @@ const register = async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      `SELECT * FROM tkaryawan 
-        WHERE kar_nama = ? 
-        AND kar_registrasi = ? 
+      `SELECT * FROM tkaryawan
+        WHERE kar_nama = ?
+        AND kar_registrasi = ?
         LIMIT 1`,
       [nama, deviceId]
     );
 
     if (rows.length > 0) {
       await db.query(
-        `UPDATE tkaryawan 
-          SET kar_jabatan = ?, 
-              kar_cabang = ?, 
+        `UPDATE tkaryawan
+          SET kar_jabatan = ?,
+              kar_cabang = ?,
               kar_password = ?
           WHERE kar_nama = ? AND kar_registrasi = ?`,
         [jabatan, cabang, password, nama, deviceId]
@@ -98,8 +105,8 @@ const register = async (req, res) => {
       });
     } else {
       await db.query(
-        `INSERT INTO tkaryawan 
-          (kar_nama, kar_cabang, kar_jabatan, kar_registrasi, kar_password, kar_isaktif) 
+        `INSERT INTO tkaryawan
+          (kar_nama, kar_cabang, kar_jabatan, kar_registrasi, kar_password, kar_isaktif)
           VALUES (?, ?, ?, ?, ?, 0)`,
         [nama, cabang, jabatan, deviceId, password]
       );
