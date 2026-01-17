@@ -359,7 +359,7 @@ const getSpkOmsetByMonth = async (req, res) => {
             spk_jumlah,
             spk_harga,
             (IFNULL(spk_jumlah,0) * IFNULL(spk_harga,0)) AS nilai
-        FROM kencanaprint_lokal.tspk
+        FROM kencanaprint.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
             AND spk_sal_kode = ?
@@ -377,7 +377,7 @@ const getSpkOmsetByMonth = async (req, res) => {
                 THEN IFNULL(spk_jumlah,0)*IFNULL(spk_harga,0) ELSE 0 END) AS garmen_premium,
             SUM(CASE WHEN spk_divisi=5
                 THEN IFNULL(spk_jumlah,0)*IFNULL(spk_harga,0) ELSE 0 END) AS digital_print
-        FROM kencanaprint_lokal.tspk
+        FROM kencanaprint.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
             AND spk_sal_kode = ?
