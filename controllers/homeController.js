@@ -479,7 +479,6 @@ const createVisit = async (req, res) => {
     }
 };
 
-
 // Get visit from visit plan
 const getVisitFromPlan = async (req, res) => {
     const user = String(req.query.user || '').trim();

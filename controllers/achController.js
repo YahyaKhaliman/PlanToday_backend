@@ -5,15 +5,97 @@ const parseYear = (v) => {
     return Number.isFinite(n) ? n : null;
 };
 
-const parseYmToInt = (ym) => {
-    if (!ym) return null;
-    const s = String(ym).trim();
-    const m = s.match(/^(\d{4})-(\d{2})$/);
-    if (!m) return null;
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    if (!y || mo < 1 || mo > 12) return null;
-    return y * 100 + mo;
+const parseIntOrNull = (v) => {
+    if (v === undefined || v === null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+};
+
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+const normalizeRange = (fromYear, fromMonth, toYear, toMonth) => {
+    const now = new Date();
+    let fy = fromYear ?? now.getFullYear();
+    let fm = fromMonth ?? (now.getMonth() + 1);
+    let ty = toYear ?? fy;
+    let tm = toMonth ?? fm;
+
+    fm = clamp(fm, 1, 12);
+    tm = clamp(tm, 1, 12);
+
+    const a = fy * 12 + (fm - 1);
+    const b = ty * 12 + (tm - 1);
+
+    // kalau kebalik, swap
+    if (a > b) {
+        [fy, ty] = [ty, fy];
+        [fm, tm] = [tm, fm];
+    }
+
+    return { fy, fm, ty, tm };
+};
+
+const getAchievementRange = async (req, res) => {
+    try {
+        const fromYear = parseIntOrNull(req.query.fromYear);
+        const fromMonth = parseIntOrNull(req.query.fromMonth);
+        const toYear = parseIntOrNull(req.query.toYear);
+        const toMonth = parseIntOrNull(req.query.toMonth);
+
+        const q = String(req.query.q || '').trim();
+        const jabatan = String(req.query.jabatan || '').trim();
+
+        const { fy, fm, ty, tm } = normalizeRange(fromYear, fromMonth, toYear, toMonth);
+
+        const sql = `
+        SELECT 
+            v.kode,
+            MAX(v.nik) AS nik,
+            MAX(v.nama) AS nama,
+            MAX(v.jabatan) AS jabatan,
+
+            CAST(ROUND(SUM(v.target), 0) AS UNSIGNED)      AS target,
+            CAST(ROUND(SUM(v.realisasi), 0) AS UNSIGNED)   AS realisasi,
+            CASE 
+            WHEN COALESCE(SUM(v.target), 0) = 0 THEN 0
+            ELSE ROUND((COALESCE(SUM(v.realisasi), 0) / COALESCE(SUM(v.target), 0)) * 100, 2)
+            END AS ach
+        FROM kpi_lokal.v_mkt_omset v
+        WHERE
+            (
+            v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?)
+            )
+            AND
+            (
+            v.tahun < ? OR (v.tahun = ? AND v.bulan <= ?)
+            )
+            AND (? = '' OR (LOWER(v.nama) LIKE CONCAT('%', LOWER(?), '%') OR LOWER(v.jabatan) LIKE CONCAT('%', LOWER(?), '%')))
+            AND (? = '' OR v.jabatan = ?)
+        GROUP BY v.kode
+        ORDER BY MAX(v.jabatan), MAX(v.nama)
+        `;
+
+        const params = [
+        fy, fy, fm,
+        ty, ty, tm,
+        q, q, q,
+        jabatan, jabatan,
+        ];
+
+        const [rows] = await db.query(sql, params);
+
+        return res.status(200).json({
+        success: true,
+        meta: { fromYear: fy, fromMonth: fm, toYear: ty, toMonth: tm, q, jabatan },
+        data: rows,
+        });
+    } catch (err) {
+        console.error('GET ACHIEVEMENT RANGE:', err);
+        return res.status(500).json({
+        success: false,
+        message: err?.message || 'Gagal mengambil achievement range',
+        });
+    }
 };
 
 // (TES) GET all data
@@ -36,34 +118,6 @@ const allData = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: err?.message || 'Gagal mengambil achievement omset',
-        });
-    }
-};
-
-// GET achievement users by year
-const getAchievementByYear = async (req, res) => {
-    try {
-        const year = parseYear(req.query.year); 
-
-        const sql = `
-        SELECT DISTINCT kode, nik, nama, jabatan
-        FROM kpi_lokal.v_mkt_omset
-        WHERE (? IS NULL OR tahun = ?)
-        ORDER BY jabatan, nama
-        `;
-
-        const params = [year, year];
-        const [rows] = await db.query(sql, params);
-
-        return res.status(200).json({
-            success: true,
-            data: rows,
-        });
-    } catch (err) {
-        console.error('GET ACHIEVEMENT BY YEAR:', err);
-            return res.status(500).json({
-            success: false,
-            message: err?.message || 'Gagal mengambil achievement user by year',
         });
     }
 };
@@ -108,8 +162,8 @@ const getOmsetByMonth = async (req, res) => {
             bulan,
             LPAD(bulan, 2, '0') AS bulan2,
             CONCAT(tahun, '-', LPAD(bulan, 2, '0')) AS periode,
-            SUM(target) AS target,
-            SUM(realisasi) AS realisasi,
+            CAST(ROUND(SUM(target), 0) AS UNSIGNED)      AS target,
+            CAST(ROUND(SUM(realisasi), 0) AS UNSIGNED)   AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
         FROM kpi_lokal.v_mkt_omset
         ${where}
@@ -357,7 +411,7 @@ module.exports = {
     allData, 
     getOmsetByMonth,
     getOmsetByYear,
-    getAchievementByYear,
+    getAchievementRange,
     getSpkOmsetByMonth,
     getAchievementOmset  
 };
