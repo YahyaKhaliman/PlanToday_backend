@@ -1,5 +1,5 @@
 const db = require('../config/dbAch');
-
+const NameMatch = require('../utils/nameMatch');
 const parseYear = (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
@@ -35,6 +35,8 @@ const normalizeRange = (fromYear, fromMonth, toYear, toMonth) => {
     return { fy, fm, ty, tm };
 };
 
+// ! ------
+
 const getAchievementRange = async (req, res) => {
     try {
         const fromYear = parseIntOrNull(req.query.fromYear);
@@ -47,6 +49,25 @@ const getAchievementRange = async (req, res) => {
 
         const { fy, fm, ty, tm } = normalizeRange(fromYear, fromMonth, toYear, toMonth);
 
+        // ===== role check =====
+        const role = String(req.user?.jabatan || '').toUpperCase(); // sesuaikan sumber auth kamu
+        const isManager = role === 'MANAGER';
+
+        let selfKode = null;
+        if (!isManager) {
+        selfKode = req.user?.kode || null;
+        if (!selfKode) {
+            const loginName = String(req.user?.nama || '').trim();
+            selfKode = await NameMatch(db, loginName);
+        }
+        if (!selfKode) {
+            return res.status(404).json({
+            success: false,
+            message: `User "${loginName}" tidak ditemukan di data achievement`,
+            });
+        }
+        }
+
         const sql = `
         SELECT
             v.kode,
@@ -56,43 +77,40 @@ const getAchievementRange = async (req, res) => {
             CAST(ROUND(SUM(v.target), 0) AS UNSIGNED)    AS target,
             CAST(ROUND(SUM(v.realisasi), 0) AS UNSIGNED) AS realisasi,
             CASE
-                WHEN COALESCE(SUM(v.target), 0) = 0 THEN 0
-                ELSE ROUND((COALESCE(SUM(v.realisasi), 0) / COALESCE(SUM(v.target), 0)) * 100, 2)
+            WHEN COALESCE(SUM(v.target), 0) = 0 THEN
+                CASE WHEN COALESCE(SUM(v.realisasi), 0) > 0 THEN 100 ELSE 0 END
+            ELSE ROUND((COALESCE(SUM(v.realisasi), 0) / COALESCE(SUM(v.target), 0)) * 100, 2)
             END AS ach
-            FROM kpi.v_mkt_omset v
-            WHERE
-            (
-                v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?)
-            )
+        FROM kpi.v_mkt_omset v
+        WHERE
+            (v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?))
             AND
-            (
-                v.tahun < ? OR (v.tahun = ? AND v.bulan <= ?)
-            )
+            (v.tahun < ? OR (v.tahun = ? AND v.bulan <= ?))
             AND (
-                ? = '' OR (
+            ? = '' OR (
                 LOWER(v.nama) LIKE CONCAT('%', LOWER(?), '%')
                 OR LOWER(v.jabatan) LIKE CONCAT('%', LOWER(?), '%')
-                )
             )
-            AND (
-                ? = '' OR v.jabatan = ?
             )
-            GROUP BY v.kode
-            ORDER BY MAX(v.jabatan), MAX(v.nama)
-            `;
+            AND (? = '' OR v.jabatan = ?)
+            ${isManager ? '' : 'AND v.kode = ?'}
+        GROUP BY v.kode
+        ORDER BY MAX(v.jabatan), MAX(v.nama)
+        `;
 
         const params = [
         fy, fy, fm,
         ty, ty, tm,
         q, q, q,
         jabatan, jabatan,
+        ...(isManager ? [] : [selfKode]),
         ];
 
         const [rows] = await db.query(sql, params);
 
         return res.status(200).json({
         success: true,
-        meta: { fromYear: fy, fromMonth: fm, toYear: ty, toMonth: tm, q, jabatan },
+        meta: { fromYear: fy, fromMonth: fm, toYear: ty, toMonth: tm, q, jabatan, selfKode },
         data: rows,
         });
     } catch (err) {
