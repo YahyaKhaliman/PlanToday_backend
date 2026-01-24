@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-require('dotenv').config();
 
 const requestLogger = require(path.join(__dirname, 'middleware', 'log'));
 

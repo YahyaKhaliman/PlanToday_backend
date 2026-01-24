@@ -35,6 +35,22 @@ const normalizeRange = (fromYear, fromMonth, toYear, toMonth) => {
     return { fy, fm, ty, tm };
 };
 
+const OMSET_NAME_MAP = {
+    'muhammad khoirul majid': 'majid',
+    'fahrur rozi': 'rozie',
+    'ZULFAN RIZKI EFENDI': 'ZULFAN'
+    // tambahkan yang lain...
+};
+
+function normalize(s = '') {
+    return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getOmsetNameKey(employeeFullName) {
+    const key = normalize(employeeFullName);
+    return OMSET_NAME_MAP[key] ?? null;
+}
+
 // ! ------
 
 const getAchievementRange = async (req, res) => {
@@ -53,12 +69,19 @@ const getAchievementRange = async (req, res) => {
         const isManager = role === 'MANAGER';
 
         let selfKode = null;
+
         if (!isManager) {
         selfKode = req.user?.kode || null;
+
         if (!selfKode) {
             const loginName = String(req.user?.nama || '').trim();
-            selfKode = await NameMatch(db, loginName);
+
+            const mappedName = getOmsetNameKey(loginName);
+            const nameToMatch = mappedName ?? loginName;
+
+            selfKode = await NameMatch(db, nameToMatch);
         }
+
         if (!selfKode) {
             return res.status(404).json({
             success: false,
@@ -80,7 +103,7 @@ const getAchievementRange = async (req, res) => {
                 CASE WHEN COALESCE(SUM(v.realisasi), 0) > 0 THEN 100 ELSE 0 END
             ELSE ROUND((COALESCE(SUM(v.realisasi), 0) / COALESCE(SUM(v.target), 0)) * 100, 2)
             END AS ach
-        FROM kpi.v_mkt_omset v
+        FROM kpi_lokal.v_mkt_omset v
         WHERE
             (v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?))
             AND
@@ -157,7 +180,7 @@ const getOmsetByMonth = async (req, res) => {
 
         const [nameRows] = await db.query(
         `SELECT MAX(nama) AS nama
-        FROM kpi.v_mkt_omset
+        FROM kpi_lokal.v_mkt_omset
         WHERE kode = ?`,
         [kode]
         );
@@ -188,7 +211,7 @@ const getOmsetByMonth = async (req, res) => {
             CAST(ROUND(SUM(target), 0) AS UNSIGNED)      AS target,
             CAST(ROUND(SUM(realisasi), 0) AS UNSIGNED)   AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi.v_mkt_omset
+        FROM kpi_lokal.v_mkt_omset
         ${where}
         GROUP BY tahun, bulan
         ORDER BY tahun, bulan
@@ -223,7 +246,7 @@ const getOmsetByYear = async (req, res) => {
 
         const [nameRows] = await db.query(
         `SELECT MAX(nama) AS nama
-        FROM kpi.v_mkt_omset
+        FROM kpi_lokal.v_mkt_omset
         WHERE kode = ?`,
         [kode]
         );
@@ -235,7 +258,7 @@ const getOmsetByYear = async (req, res) => {
             SUM(target) AS target,
             SUM(realisasi) AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi.v_mkt_omset
+        FROM kpi_lokal.v_mkt_omset
         WHERE kode = ?
         GROUP BY tahun
         ORDER BY tahun;
@@ -276,7 +299,7 @@ const getAchievementOmset = async (req, res) => {
         // base query
         let sql = `
         SELECT
-            kpi,
+            kpi_lokal,
             kode,
             nik,
             nama,
@@ -381,7 +404,7 @@ const getSpkOmsetByMonth = async (req, res) => {
             spk_jumlah,
             spk_harga,
             (IFNULL(spk_jumlah,0) * IFNULL(spk_harga,0)) AS nilai
-        FROM kencanaprint.tspk
+        FROM kencanaprint_lokal.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
             AND spk_sal_kode = ?
@@ -399,7 +422,7 @@ const getSpkOmsetByMonth = async (req, res) => {
                 THEN IFNULL(spk_jumlah,0)*IFNULL(spk_harga,0) ELSE 0 END) AS garmen_premium,
             SUM(CASE WHEN spk_divisi=5
                 THEN IFNULL(spk_jumlah,0)*IFNULL(spk_harga,0) ELSE 0 END) AS digital_print
-        FROM kencanaprint.tspk
+        FROM kencanaprint_lokal.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
             AND spk_sal_kode = ?
@@ -436,5 +459,7 @@ module.exports = {
     getOmsetByYear,
     getAchievementRange,
     getSpkOmsetByMonth,
-    getAchievementOmset
+    getAchievementOmset,
+    getOmsetNameKey,
+    normalize
 };

@@ -1,15 +1,9 @@
 const db = require('../config/dbMain');
 const jwt = require('jsonwebtoken');
 
-const token = jwt.sign(
-  { id: user.id },
-  process.env.JWT_SECRET,
-  { expiresIn: '7d' }
-);
-
 const login = async (req, res) => {
   const { username, password, deviceId, versiApp } = req.body;
-  console.debug(req.body);
+
   if (!username || !password) {
     return res.status(400).json({
       success: false,
@@ -18,7 +12,6 @@ const login = async (req, res) => {
   }
 
   try {
-    // Autentikasi User
     const [rows] = await db.query(
       `SELECT *
         FROM tkaryawan
@@ -38,22 +31,23 @@ const login = async (req, res) => {
 
     const user = rows[0];
 
-    // Log Login
+    const token = jwt.sign(
+      { id: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     await db.query(
       `INSERT INTO log_plantoday
         (log_nama, log_cabang, log_versi_app, tanggal, log_phoneid)
-      VALUES (?, ?, ?, NOW(), ?)`,
-      [
-        user.kar_nama,
-        user.kar_cabang,
-        versiApp || '',
-        deviceId || '',
-      ]
+        VALUES (?, ?, ?, NOW(), ?)`,
+      [user.kar_nama, user.kar_cabang, versiApp || '', deviceId || '']
     );
 
-    // Response
-    res.status(200).json({
+    console.log('AUTH HEADER:', req.headers.authorization);
+    return res.status(200).json({
       success: true,
+      token,
       user: {
         id: user.id,
         nama: user.kar_nama,
@@ -63,7 +57,7 @@ const login = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Kesalahan server',
     });

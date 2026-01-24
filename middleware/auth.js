@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const db = require('../config/dbMain');
 
-module.exports = async function authMiddleware(req, res, next) {
+module.exports = async function auth(req, res, next) {
     try {
         const header = req.headers.authorization || '';
         const token = header.startsWith('Bearer ') ? header.slice(7) : null;
