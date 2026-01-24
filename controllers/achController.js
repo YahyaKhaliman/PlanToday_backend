@@ -65,7 +65,7 @@ const getAchievementRange = async (req, res) => {
 
         const { fy, fm, ty, tm } = normalizeRange(fromYear, fromMonth, toYear, toMonth);
 
-        const role = String(req.user?.jabatan || '').toUpperCase(); // sesuaikan sumber auth kamu
+        const role = String(req.user?.jabatan || '').toUpperCase();
         const isManager = role === 'MANAGER';
 
         let selfKode = null;
