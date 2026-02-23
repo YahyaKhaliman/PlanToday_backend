@@ -103,7 +103,7 @@ const getAchievementRange = async (req, res) => {
                 CASE WHEN COALESCE(SUM(v.realisasi), 0) > 0 THEN 100 ELSE 0 END
             ELSE ROUND((COALESCE(SUM(v.realisasi), 0) / COALESCE(SUM(v.target), 0)) * 100, 2)
             END AS ach
-        FROM kpi.v_mkt_omset v
+        FROM kpi_lokal.v_mkt_omset v
         WHERE
             (v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?))
             AND
@@ -180,7 +180,7 @@ const getOmsetByMonth = async (req, res) => {
 
         const [nameRows] = await db.query(
         `SELECT MAX(nama) AS nama
-        FROM kpi.v_mkt_omset
+        FROM kpi_lokal.v_mkt_omset
         WHERE kode = ?`,
         [kode]
         );
@@ -211,7 +211,7 @@ const getOmsetByMonth = async (req, res) => {
             CAST(ROUND(SUM(target), 0) AS UNSIGNED)      AS target,
             CAST(ROUND(SUM(realisasi), 0) AS UNSIGNED)   AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi.v_mkt_omset
+        FROM kpi_lokal.v_mkt_omset
         ${where}
         GROUP BY tahun, bulan
         ORDER BY tahun, bulan
@@ -246,7 +246,7 @@ const getOmsetByYear = async (req, res) => {
 
         const [nameRows] = await db.query(
         `SELECT MAX(nama) AS nama
-        FROM kpi.v_mkt_omset
+        FROM kpi_lokal.v_mkt_omset
         WHERE kode = ?`,
         [kode]
         );
@@ -258,7 +258,7 @@ const getOmsetByYear = async (req, res) => {
             SUM(target) AS target,
             SUM(realisasi) AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi.v_mkt_omset
+        FROM kpi_lokal.v_mkt_omset
         WHERE kode = ?
         GROUP BY tahun
         ORDER BY tahun;
@@ -299,7 +299,7 @@ const getAchievementOmset = async (req, res) => {
         // base query
         let sql = `
         SELECT
-            kpi,
+            kpi_lokal,
             kode,
             nik,
             nama,
@@ -344,7 +344,6 @@ const getAchievementOmset = async (req, res) => {
 
         const [rows] = await db.query(sql, params);
 
-        // summary (opsional tapi enak buat header FE)
         const totalTarget = rows.reduce((a, x) => a + (Number(x.target) || 0), 0);
         const totalRealisasi = rows.reduce((a, x) => a + (Number(x.realisasi) || 0), 0);
         const overallAch = totalTarget > 0 ? Math.round((totalRealisasi / totalTarget) * 10000) / 100 : 0;
@@ -404,7 +403,7 @@ const getSpkOmsetByMonth = async (req, res) => {
             spk_jumlah,
             spk_harga,
             (IFNULL(spk_jumlah,0) * IFNULL(spk_harga,0)) AS nilai
-        FROM kencanaprint.tspk
+        FROM kencanaprint_lokal.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
             AND spk_sal_kode = ?
@@ -422,7 +421,7 @@ const getSpkOmsetByMonth = async (req, res) => {
                 THEN IFNULL(spk_jumlah,0)*IFNULL(spk_harga,0) ELSE 0 END) AS garmen_premium,
             SUM(CASE WHEN spk_divisi=5
                 THEN IFNULL(spk_jumlah,0)*IFNULL(spk_harga,0) ELSE 0 END) AS digital_print
-        FROM kencanaprint.tspk
+        FROM kencanaprint_lokal.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
             AND spk_sal_kode = ?
