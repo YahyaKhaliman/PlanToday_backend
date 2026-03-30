@@ -2,8 +2,7 @@ const db = require("../config/dbMain");
 const jwt = require("jsonwebtoken");
 
 const login = async (req, res) => {
-    const body = req.body || {};
-    const { username, password, deviceId, versiApp } = body;
+    const { username, password, deviceId, versiApp } = req.body;
 
     if (!username || !password) {
         return res.status(400).json({
@@ -64,9 +63,8 @@ const login = async (req, res) => {
 };
 
 const register = async (req, res) => {
-    const body = req.body || {};
-    const { nama, password, cabang, jabatan, deviceId } = body;
-    console.debug(body);
+    const { nama, password, cabang, jabatan, deviceId } = req.body;
+    console.debug(req.body);
     if (!nama || nama.length < 3 || !password || password.length < 3) {
         return res.status(400).json({
             success: false,
@@ -121,8 +119,7 @@ const register = async (req, res) => {
 };
 
 const checkDevice = async (req, res) => {
-    const body = req.body || {};
-    const { deviceId } = body;
+    const { deviceId } = req.body;
     if (!deviceId) {
         return res.status(400).json({
             success: false,

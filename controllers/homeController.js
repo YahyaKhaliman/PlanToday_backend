@@ -154,11 +154,13 @@ const updateCalonCustomerByKode = async (req, res) => {
         );
 
         if (result?.affectedRows === 0) {
-            return res.status(200).json({
-                success: true,
-                message: "Tidak ada perubahan",
-                data: rows?.[0] || null,
-            });
+            return res
+                .status(200)
+                .json({
+                    success: true,
+                    message: "Tidak ada perubahan",
+                    data: rows?.[0] || null,
+                });
         }
 
         return res.json({
@@ -216,20 +218,47 @@ const cariCustomer = async (req, res) => {
         const [rows] = await db.query(
             `
     SELECT
-        CONCAT('CALON-', cc_id)  AS id,
-        cc_kode                  AS cc_kode,
-        cc_nama                  AS cc_nama,
-        cc_alamat                AS cc_alamat,
-        cc_cp                    AS cc_cp,
-        cc_telp                  AS cc_telp,
-        cc_kota                  AS cc_kota,
-        'CALONCUSTOMER'          AS sumber
-    FROM tcaloncustomer
-    WHERE cc_nama LIKE ?
-    ORDER BY cc_nama ASC
+        x.id,
+        x.cc_kode,
+        x.cc_nama,
+        x.cc_alamat,
+        x.cc_cp,
+        x.cc_telp,
+        x.cc_kota,
+        x.sumber
+    FROM (
+        -- 1) Calon customer
+        SELECT
+        CONCAT('CALON-', cc_id)                AS id,
+        cc_kode                               AS cc_kode,
+        cc_nama                               AS cc_nama,
+        cc_alamat                             AS cc_alamat,
+        cc_cp                                 AS cc_cp,
+        cc_telp                               AS cc_telp,
+        cc_kota                               AS cc_kota,
+        'CALONCUSTOMER'                       AS sumber
+        FROM tcaloncustomer
+        WHERE cc_nama LIKE ?
+
+        UNION ALL
+
+        -- 2) Customer aktif
+        SELECT
+        CONCAT('CUSTOMER-', NULLIF(cus_kode, '')) AS id,
+        cus_kode                                   AS cc_kode,
+        cus_nama                                   AS cc_nama,
+        cus_alamat                                 AS cc_alamat,
+        cus_cp                                     AS cc_cp,
+        cus_telp                                   AS cc_telp,
+        cus_kota                                   AS cc_kota,
+        'CUSTOMER'                                 AS sumber
+        FROM tcustomer
+        WHERE cus_nama LIKE ?
+    ) x
+    ORDER BY x.cc_nama ASC
     LIMIT 50
     `,
-            [like],
+            [like, like],
         );
 
         return res.json({ success: true, data: rows });
@@ -650,10 +679,12 @@ const uploadVisitPhoto = async (req, res) => {
             .status(400)
             .json({ success: false, message: "ID visit tidak valid" });
     if (!req.file)
-        return res.status(400).json({
-            success: false,
-            message: "File foto tidak ditemukan (req.file kosong)",
-        });
+        return res
+            .status(400)
+            .json({
+                success: false,
+                message: "File foto tidak ditemukan (req.file kosong)",
+            });
 
     try {
         const relativePath = `/uploads/visits/${req.file.filename}`;
@@ -699,19 +730,24 @@ const getRekapVisit = async (req, res) => {
 
     if (tanggal) {
         if (!isYmd(tanggal)) {
-            return res.status(400).json({
-                success: false,
-                message: "format tanggal harus YYYY-MM-DD",
-            });
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    message: "format tanggal harus YYYY-MM-DD",
+                });
         }
         start = tanggal;
         end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
         if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-            return res.status(400).json({
-                success: false,
-                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
-            });
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    message:
+                        "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+                });
         }
         start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
         end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
@@ -794,18 +830,23 @@ const rekapVisitWA = async (req, res) => {
 
     if (tanggal) {
         if (!isYmd(tanggal))
-            return res.status(400).json({
-                success: false,
-                message: "format tanggal harus YYYY-MM-DD",
-            });
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    message: "format tanggal harus YYYY-MM-DD",
+                });
         start = tanggal;
         end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
         if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-            return res.status(400).json({
-                success: false,
-                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
-            });
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    message:
+                        "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+                });
         }
         start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
         end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
@@ -995,19 +1036,24 @@ const rekapVisitPlanWA = async (req, res) => {
 
     if (tanggal) {
         if (!isYmd(tanggal)) {
-            return res.status(400).json({
-                success: false,
-                message: "format tanggal harus YYYY-MM-DD",
-            });
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    message: "format tanggal harus YYYY-MM-DD",
+                });
         }
         start = tanggal;
         end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
         if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-            return res.status(400).json({
-                success: false,
-                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
-            });
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    message:
+                        "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+                });
         }
         start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
         end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
@@ -1160,10 +1206,12 @@ const getRekapCalonCustomer = async (req, res) => {
         return res.json({ success: true, data: rows });
     } catch (err) {
         console.error("GET REKAP CALON CUSTOMER ERROR:", err);
-        return res.status(500).json({
-            success: false,
-            message: "Gagal mengambil rekap calon customer",
-        });
+        return res
+            .status(500)
+            .json({
+                success: false,
+                message: "Gagal mengambil rekap calon customer",
+            });
     }
 };
 
@@ -1225,7 +1273,7 @@ const rekapCalonCustomerWA = async (req, res) => {
             cus_telp  AS cc_telp,
             cus_kota  AS cc_kota,
             'CUSTOMER' AS sumber
-            FROM tcaloncustomer
+            FROM tcustomer
             WHERE cus_nama LIKE ?
             ${cab ? "AND cus_kota = ?" : ""}
         ) x
@@ -1310,10 +1358,12 @@ const gantiPassword = async (req, res) => {
         );
 
         if (!rows || rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "User tidak ditemukan / tidak aktif",
-            });
+            return res
+                .status(404)
+                .json({
+                    success: false,
+                    message: "User tidak ditemukan / tidak aktif",
+                });
         }
 
         const currentPassword = rows[0].kar_password;
@@ -1325,10 +1375,12 @@ const gantiPassword = async (req, res) => {
         }
 
         if (newPassword.length < 3) {
-            return res.status(400).json({
-                success: false,
-                message: "Password baru tidak valid.",
-            });
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    message: "Password baru tidak valid.",
+                });
         }
 
         // update password
