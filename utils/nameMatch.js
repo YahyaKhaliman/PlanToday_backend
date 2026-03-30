@@ -1,18 +1,18 @@
 module.exports = async function NameMatch(db, loginName) {
-    const raw = String(loginName || '').trim();
+    const raw = String(loginName || "").trim();
     if (!raw) return null;
 
     const loginNorm = raw
         .toUpperCase()
-        .replace(/[^A-Z0-9 ]+/g, ' ')
-        .replace(/\s+/g, ' ')
+        .replace(/[^A-Z0-9 ]+/g, " ")
+        .replace(/\s+/g, " ")
         .trim();
 
     if (!loginNorm) return null;
 
-    const parts = loginNorm.split(' ').filter(Boolean);
-    const first = parts[0] || '';
-    const last = parts[parts.length - 1] || '';
+    const parts = loginNorm.split(" ").filter(Boolean);
+    const first = parts[0] || "";
+    const last = parts[parts.length - 1] || "";
 
     const sql = `
         SELECT
@@ -47,7 +47,7 @@ module.exports = async function NameMatch(db, loginName) {
                 )
             ),
             ' ') AS nama_padded
-        FROM kpi_lokal.v_mkt_omset
+        FROM kpi.v_mkt_omset
         ) v
         WHERE
         v.nama_norm = ?
@@ -60,8 +60,16 @@ module.exports = async function NameMatch(db, loginName) {
     `;
 
     const params = [
-        loginNorm, loginNorm, first, last, first,
-        loginNorm, loginNorm, first, last, first,
+        loginNorm,
+        loginNorm,
+        first,
+        last,
+        first,
+        loginNorm,
+        loginNorm,
+        first,
+        last,
+        first,
     ];
 
     const [rows] = await db.query(sql, params);

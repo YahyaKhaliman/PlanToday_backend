@@ -1,12 +1,12 @@
-const db = require('../config/dbAch');
-const NameMatch = require('../utils/nameMatch');
+const db = require("../config/dbAch");
+const NameMatch = require("../utils/nameMatch");
 const parseYear = (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
 };
 
 const parseIntOrNull = (v) => {
-    if (v === undefined || v === null || v === '') return null;
+    if (v === undefined || v === null || v === "") return null;
     const n = Number(v);
     return Number.isFinite(n) ? Math.trunc(n) : null;
 };
@@ -16,7 +16,7 @@ const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 const normalizeRange = (fromYear, fromMonth, toYear, toMonth) => {
     const now = new Date();
     let fy = fromYear ?? now.getFullYear();
-    let fm = fromMonth ?? (now.getMonth() + 1);
+    let fm = fromMonth ?? now.getMonth() + 1;
     let ty = toYear ?? fy;
     let tm = toMonth ?? fm;
 
@@ -36,14 +36,18 @@ const normalizeRange = (fromYear, fromMonth, toYear, toMonth) => {
 };
 
 const OMSET_NAME_MAP = {
-    'muhammad khoirul majid': 'majid',
-    'fahrur rozi': 'rozie',
-    'ZULFAN RIZKI EFENDI': 'ZULFAN'
+    "muhammad khoirul majid": "majid",
+    "fahrur rozi": "rozie",
+    "ZULFAN RIZKI EFENDI": "ZULFAN",
     // tambahkan yang lain...
 };
 
-function normalize(s = '') {
-    return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+function normalize(s = "") {
+    return s
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 }
 
 function getOmsetNameKey(employeeFullName) {
@@ -60,34 +64,39 @@ const getAchievementRange = async (req, res) => {
         const toYear = parseIntOrNull(req.query.toYear);
         const toMonth = parseIntOrNull(req.query.toMonth);
 
-        const q = String(req.query.q || '').trim();
-        const jabatan = String(req.query.jabatan || '').trim();
+        const q = String(req.query.q || "").trim();
+        const jabatan = String(req.query.jabatan || "").trim();
 
-        const { fy, fm, ty, tm } = normalizeRange(fromYear, fromMonth, toYear, toMonth);
+        const { fy, fm, ty, tm } = normalizeRange(
+            fromYear,
+            fromMonth,
+            toYear,
+            toMonth,
+        );
 
-        const role = String(req.user?.jabatan || '').toUpperCase();
-        const isManager = role === 'MANAGER';
+        const role = String(req.user?.jabatan || "").toUpperCase();
+        const isManager = role === "MANAGER";
 
         let selfKode = null;
 
         if (!isManager) {
-        selfKode = req.user?.kode || null;
+            selfKode = req.user?.kode || null;
 
-        if (!selfKode) {
-            const loginName = String(req.user?.nama || '').trim();
+            if (!selfKode) {
+                const loginName = String(req.user?.nama || "").trim();
 
-            const mappedName = getOmsetNameKey(loginName);
-            const nameToMatch = mappedName ?? loginName;
+                const mappedName = getOmsetNameKey(loginName);
+                const nameToMatch = mappedName ?? loginName;
 
-            selfKode = await NameMatch(db, nameToMatch);
-        }
+                selfKode = await NameMatch(db, nameToMatch);
+            }
 
-        if (!selfKode) {
-            return res.status(404).json({
-            success: false,
-            message: `User "${req.user?.nama}" tidak ditemukan di data achievement`,
-            });
-        }
+            if (!selfKode) {
+                return res.status(404).json({
+                    success: false,
+                    message: `User "${req.user?.nama}" tidak ditemukan di data achievement`,
+                });
+            }
         }
 
         const sql = `
@@ -103,7 +112,7 @@ const getAchievementRange = async (req, res) => {
                 CASE WHEN COALESCE(SUM(v.realisasi), 0) > 0 THEN 100 ELSE 0 END
             ELSE ROUND((COALESCE(SUM(v.realisasi), 0) / COALESCE(SUM(v.target), 0)) * 100, 2)
             END AS ach
-        FROM kpi_lokal.v_mkt_omset v
+        FROM kpi.v_mkt_omset v
         WHERE
             (v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?))
             AND
@@ -115,31 +124,46 @@ const getAchievementRange = async (req, res) => {
             )
             )
             AND (? = '' OR v.jabatan = ?)
-            ${isManager ? '' : 'AND v.kode = ?'}
+            ${isManager ? "" : "AND v.kode = ?"}
         GROUP BY v.kode
         ORDER BY MAX(v.jabatan), MAX(v.nama)
         `;
 
         const params = [
-        fy, fy, fm,
-        ty, ty, tm,
-        q, q, q,
-        jabatan, jabatan,
-        ...(isManager ? [] : [selfKode]),
+            fy,
+            fy,
+            fm,
+            ty,
+            ty,
+            tm,
+            q,
+            q,
+            q,
+            jabatan,
+            jabatan,
+            ...(isManager ? [] : [selfKode]),
         ];
 
         const [rows] = await db.query(sql, params);
 
         return res.status(200).json({
-        success: true,
-        meta: { fromYear: fy, fromMonth: fm, toYear: ty, toMonth: tm, q, jabatan, selfKode },
-        data: rows,
+            success: true,
+            meta: {
+                fromYear: fy,
+                fromMonth: fm,
+                toYear: ty,
+                toMonth: tm,
+                q,
+                jabatan,
+                selfKode,
+            },
+            data: rows,
         });
     } catch (err) {
-        console.error('GET ACHIEVEMENT RANGE:', err);
+        console.error("GET ACHIEVEMENT RANGE:", err);
         return res.status(500).json({
-        success: false,
-        message: err?.message || 'Gagal mengambil achievement range',
+            success: false,
+            message: err?.message || "Gagal mengambil achievement range",
         });
     }
 };
@@ -160,10 +184,10 @@ const allData = async (req, res) => {
             data: rows,
         });
     } catch (err) {
-        console.error('GET ACHIEVEMENT OMSET ERROR:', err);
+        console.error("GET ACHIEVEMENT OMSET ERROR:", err);
         return res.status(500).json({
             success: false,
-            message: err?.message || 'Gagal mengambil achievement omset',
+            message: err?.message || "Gagal mengambil achievement omset",
         });
     }
 };
@@ -171,18 +195,19 @@ const allData = async (req, res) => {
 // GET omset per bulan
 const getOmsetByMonth = async (req, res) => {
     try {
-        const kode = String(req.params.id || req.user?.kode || '').trim()
+        const kode = String(req.params.id || req.user?.kode || "").trim();
 
         if (!kode)
             return res.status(400).json({
-        success:false, message:'kode tidak terdeteksi'
-        });
+                success: false,
+                message: "kode tidak terdeteksi",
+            });
 
         const [nameRows] = await db.query(
-        `SELECT MAX(nama) AS nama
-        FROM kpi_lokal.v_mkt_omset
+            `SELECT MAX(nama) AS nama
+        FROM kpi.v_mkt_omset
         WHERE kode = ?`,
-        [kode]
+            [kode],
         );
 
         const nama = nameRows?.[0]?.nama || null;
@@ -196,7 +221,7 @@ const getOmsetByMonth = async (req, res) => {
 
         if (fromInt && toInt) {
             where += ` AND (tahun*100 + bulan) BETWEEN ? AND ?`;
-        params.push(fromInt, toInt);
+            params.push(fromInt, toInt);
         } else if (year) {
             where += ` AND tahun = ?`;
             params.push(year);
@@ -211,7 +236,7 @@ const getOmsetByMonth = async (req, res) => {
             CAST(ROUND(SUM(target), 0) AS UNSIGNED)      AS target,
             CAST(ROUND(SUM(realisasi), 0) AS UNSIGNED)   AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi_lokal.v_mkt_omset
+        FROM kpi.v_mkt_omset
         ${where}
         GROUP BY tahun, bulan
         ORDER BY tahun, bulan
@@ -222,14 +247,14 @@ const getOmsetByMonth = async (req, res) => {
         return res.status(200).json({
             success: true,
             nama: nama,
-            group: 'month',
+            group: "month",
             data: rows,
         });
     } catch (err) {
-        console.error('GET OMSET BY MONTH:', err);
+        console.error("GET OMSET BY MONTH:", err);
         return res.status(500).json({
             success: false,
-            message: err?.message || 'Gagal mengambil omset per bulan',
+            message: err?.message || "Gagal mengambil omset per bulan",
         });
     }
 };
@@ -237,18 +262,19 @@ const getOmsetByMonth = async (req, res) => {
 // GET omset per tahun
 const getOmsetByYear = async (req, res) => {
     try {
-        const kode = String(req.params.id || req.user?.kode || '').trim()
+        const kode = String(req.params.id || req.user?.kode || "").trim();
 
         if (!kode)
             return res.status(400).json({
-        success:false, message:'kode tidak terdeteksi'
-        });
+                success: false,
+                message: "kode tidak terdeteksi",
+            });
 
         const [nameRows] = await db.query(
-        `SELECT MAX(nama) AS nama
-        FROM kpi_lokal.v_mkt_omset
+            `SELECT MAX(nama) AS nama
+        FROM kpi.v_mkt_omset
         WHERE kode = ?`,
-        [kode]
+            [kode],
         );
         const nama = nameRows?.[0]?.nama || null;
 
@@ -258,7 +284,7 @@ const getOmsetByYear = async (req, res) => {
             SUM(target) AS target,
             SUM(realisasi) AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi_lokal.v_mkt_omset
+        FROM kpi.v_mkt_omset
         WHERE kode = ?
         GROUP BY tahun
         ORDER BY tahun;
@@ -269,14 +295,14 @@ const getOmsetByYear = async (req, res) => {
         return res.status(200).json({
             success: true,
             nama: nama,
-            group: 'years',
+            group: "years",
             data: rows,
         });
     } catch (err) {
-        console.error('GET OMSET BY YEAR ERROR:', err);
+        console.error("GET OMSET BY YEAR ERROR:", err);
         return res.status(500).json({
             success: false,
-            message: err?.message || 'Gagal mengambil omset per tahun',
+            message: err?.message || "Gagal mengambil omset per tahun",
         });
     }
 };
@@ -285,21 +311,27 @@ const getOmsetByYear = async (req, res) => {
 const getAchievementOmset = async (req, res) => {
     try {
         const now = new Date();
-        const tahun = parseInt(req.query.tahun || String(now.getFullYear()), 10);
-        const bulan = parseInt(req.query.bulan || String(now.getMonth() + 1), 10);
+        const tahun = parseInt(
+            req.query.tahun || String(now.getFullYear()),
+            10,
+        );
+        const bulan = parseInt(
+            req.query.bulan || String(now.getMonth() + 1),
+            10,
+        );
 
-        const nik = String(req.query.nik || '').trim();
-        const jabatan = String(req.query.jabatan || '').trim();
-        const search = String(req.query.search || '').trim();
+        const nik = String(req.query.nik || "").trim();
+        const jabatan = String(req.query.jabatan || "").trim();
+        const search = String(req.query.search || "").trim();
 
-        let limit = parseInt(req.query.limit || '50', 10);
+        let limit = parseInt(req.query.limit || "50", 10);
         if (Number.isNaN(limit) || limit <= 0) limit = 50;
         if (limit > 200) limit = 200;
 
         // base query
         let sql = `
         SELECT
-            kpi_lokal,
+            kpi,
             kode,
             nik,
             nama,
@@ -344,21 +376,41 @@ const getAchievementOmset = async (req, res) => {
 
         const [rows] = await db.query(sql, params);
 
-        const totalTarget = rows.reduce((a, x) => a + (Number(x.target) || 0), 0);
-        const totalRealisasi = rows.reduce((a, x) => a + (Number(x.realisasi) || 0), 0);
-        const overallAch = totalTarget > 0 ? Math.round((totalRealisasi / totalTarget) * 10000) / 100 : 0;
+        const totalTarget = rows.reduce(
+            (a, x) => a + (Number(x.target) || 0),
+            0,
+        );
+        const totalRealisasi = rows.reduce(
+            (a, x) => a + (Number(x.realisasi) || 0),
+            0,
+        );
+        const overallAch =
+            totalTarget > 0
+                ? Math.round((totalRealisasi / totalTarget) * 10000) / 100
+                : 0;
 
         return res.json({
             success: true,
-            filter: { tahun, bulan, nik: nik || null, jabatan: jabatan || null, search: search || null, limit },
-            summary: { total_target: totalTarget, total_realisasi: totalRealisasi, ach: overallAch },
+            filter: {
+                tahun,
+                bulan,
+                nik: nik || null,
+                jabatan: jabatan || null,
+                search: search || null,
+                limit,
+            },
+            summary: {
+                total_target: totalTarget,
+                total_realisasi: totalRealisasi,
+                ach: overallAch,
+            },
             data: rows,
         });
     } catch (err) {
-        console.error('GET ACHIEVEMENT OMSET ERROR:', err);
+        console.error("GET ACHIEVEMENT OMSET ERROR:", err);
         return res.status(500).json({
             success: false,
-            message: err?.message || 'Gagal mengambil achievement omset',
+            message: err?.message || "Gagal mengambil achievement omset",
         });
     }
 };
@@ -366,30 +418,38 @@ const getAchievementOmset = async (req, res) => {
 // Get Omset BY SPK per Month
 const getSpkOmsetByMonth = async (req, res) => {
     try {
-        const isManager = String(req.user?.jabatan || '').toUpperCase() === 'MANAGER';
+        const isManager =
+            String(req.user?.jabatan || "").toUpperCase() === "MANAGER";
 
         const tahun = Number(req.query.tahun);
         const bulan = Number(req.query.bulan);
 
         if (!tahun || !bulan || bulan < 1 || bulan > 12) {
-        return res.status(400).json({
-            success: false,
-            message: 'Query tahun & bulan wajib (bulan 1-12)',
-        });
+            return res.status(400).json({
+                success: false,
+                message: "Query tahun & bulan wajib (bulan 1-12)",
+            });
         }
 
-        const kodeFromUser = req.user?.kode || req.user?.sal_kode || req.user?.kode_sales || req.user?.spk_sal_kode;
+        const kodeFromUser =
+            req.user?.kode ||
+            req.user?.sal_kode ||
+            req.user?.kode_sales ||
+            req.user?.spk_sal_kode;
         const kode = isManager ? req.params.kode : kodeFromUser;
 
         if (!kode) {
-        return res.status(400).json({
-            success: false,
-            message: 'Kode sales tidak ditemukan di session user',
-        });
+            return res.status(400).json({
+                success: false,
+                message: "Kode sales tidak ditemukan di session user",
+            });
         }
 
         const page = Math.max(1, Number(req.query.page || 1));
-        const limit = Math.min(100, Math.max(10, Number(req.query.limit || 20)));
+        const limit = Math.min(
+            100,
+            Math.max(10, Number(req.query.limit || 20)),
+        );
         const offset = (page - 1) * limit;
 
         const sqlList = `
@@ -429,25 +489,36 @@ const getSpkOmsetByMonth = async (req, res) => {
             AND MONTH(spk_tanggal) = ?;
         `;
 
-        const [rows] = await db.query(sqlList, [kode, tahun, bulan, limit, offset]);
+        const [rows] = await db.query(sqlList, [
+            kode,
+            tahun,
+            bulan,
+            limit,
+            offset,
+        ]);
         const [sumRows] = await db.query(sqlSummary, [kode, tahun, bulan]);
-        const summary = sumRows?.[0] || { total_spk: 0, total_realisasi: 0, garmen_premium: 0, digital_print: 0 };
+        const summary = sumRows?.[0] || {
+            total_spk: 0,
+            total_realisasi: 0,
+            garmen_premium: 0,
+            digital_print: 0,
+        };
 
         return res.status(200).json({
-        success: true,
-        kode,
-        tahun,
-        bulan,
-        page,
-        limit,
-        summary,
-        data: rows,
+            success: true,
+            kode,
+            tahun,
+            bulan,
+            page,
+            limit,
+            summary,
+            data: rows,
         });
     } catch (err) {
-        console.error('GET SPK OMSET BY MONTH ERROR:', err);
+        console.error("GET SPK OMSET BY MONTH ERROR:", err);
         return res.status(500).json({
-        success: false,
-        message: err?.message || 'Gagal mengambil detail SPK omset',
+            success: false,
+            message: err?.message || "Gagal mengambil detail SPK omset",
         });
     }
 };
@@ -460,5 +531,5 @@ module.exports = {
     getSpkOmsetByMonth,
     getAchievementOmset,
     getOmsetNameKey,
-    normalize
+    normalize,
 };
