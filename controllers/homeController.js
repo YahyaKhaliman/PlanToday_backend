@@ -216,47 +216,20 @@ const cariCustomer = async (req, res) => {
         const [rows] = await db.query(
             `
     SELECT
-        x.id,
-        x.cc_kode,
-        x.cc_nama,
-        x.cc_alamat,
-        x.cc_cp,
-        x.cc_telp,
-        x.cc_kota,
-        x.sumber
-    FROM (
-        -- 1) Calon customer
-        SELECT
-        CONCAT('CALON-', cc_id)                AS id,
-        cc_kode                               AS cc_kode,
-        cc_nama                               AS cc_nama,
-        cc_alamat                             AS cc_alamat,
-        cc_cp                                 AS cc_cp,
-        cc_telp                               AS cc_telp,
-        cc_kota                               AS cc_kota,
-        'CALONCUSTOMER'                       AS sumber
-        FROM tcaloncustomer
-        WHERE cc_nama LIKE ?
-
-        UNION ALL
-
-        -- 2) Customer aktif
-        SELECT
-        CONCAT('CUSTOMER-', NULLIF(cus_kode, '')) AS id,
-        cus_kode                                   AS cc_kode,
-        cus_nama                                   AS cc_nama,
-        cus_alamat                                 AS cc_alamat,
-        cus_cp                                     AS cc_cp,
-        cus_telp                                   AS cc_telp,
-        cus_kota                                   AS cc_kota,
-        'CUSTOMER'                                 AS sumber
-        FROM tcaloncustomer
-        WHERE cus_nama LIKE ?
-    ) x
-    ORDER BY x.cc_nama ASC
+        CONCAT('CALON-', cc_id)  AS id,
+        cc_kode                  AS cc_kode,
+        cc_nama                  AS cc_nama,
+        cc_alamat                AS cc_alamat,
+        cc_cp                    AS cc_cp,
+        cc_telp                  AS cc_telp,
+        cc_kota                  AS cc_kota,
+        'CALONCUSTOMER'          AS sumber
+    FROM tcaloncustomer
+    WHERE cc_nama LIKE ?
+    ORDER BY cc_nama ASC
     LIMIT 50
     `,
-            [like, like],
+            [like],
         );
 
         return res.json({ success: true, data: rows });
