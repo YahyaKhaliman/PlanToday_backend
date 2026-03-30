@@ -1,6 +1,6 @@
-const db = require('../config/dbMain');
+const db = require("../config/dbMain");
 
-function safe(v, fallback = '-') {
+function safe(v, fallback = "-") {
     if (v === null || v === undefined) return fallback;
     const s = String(v).trim();
     return s.length ? s : fallback;
@@ -18,8 +18,8 @@ function formatStatus(status) {
     return "-";
 }
 function getPublicBaseUrl(req) {
-    const proto = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const proto = req.headers["x-forwarded-proto"] || req.protocol;
+    const host = req.headers["x-forwarded-host"] || req.get("host");
     return `${proto}://${host}`;
 }
 
@@ -29,8 +29,8 @@ const calonCustomer = async (req, res) => {
 
     if (!nama) {
         return res.status(400).json({
-        success: false,
-        message: 'Nama customer wajib diisi',
+            success: false,
+            message: "Nama customer wajib diisi",
         });
     }
 
@@ -41,50 +41,49 @@ const calonCustomer = async (req, res) => {
 
         // ambil cc_id terakhir
         const [[{ lastId }]] = await conn.query(
-        'SELECT IFNULL(MAX(cc_id), 0) AS lastId FROM tcaloncustomer'
+            "SELECT IFNULL(MAX(cc_id), 0) AS lastId FROM tcaloncustomer",
         );
 
         let nextId = lastId + 1;
-        let ccKode = '';
+        let ccKode = "";
 
         // memastikan cc_kode tidak bentrok
         while (true) {
-        ccKode = `CC-${String(nextId).padStart(4, '0')}`;
+            ccKode = `CC-${String(nextId).padStart(4, "0")}`;
 
-        const [cek] = await conn.query(
-            'SELECT 1 FROM tcaloncustomer WHERE cc_kode = ?',
-            [ccKode]
-        );
+            const [cek] = await conn.query(
+                "SELECT 1 FROM tcaloncustomer WHERE cc_kode = ?",
+                [ccKode],
+            );
 
-        if (cek.length === 0) break;
-        nextId++;
+            if (cek.length === 0) break;
+            nextId++;
         }
 
         // Insert data
         await conn.query(
-        `INSERT INTO tcaloncustomer
+            `INSERT INTO tcaloncustomer
         (cc_id, cc_kode, cc_nama, cc_alamat, cc_kota, cc_telp, cc_cp)
         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [nextId, ccKode, nama, alamat, cabang, telp, pic]
+            [nextId, ccKode, nama, alamat, cabang, telp, pic],
         );
 
         await conn.commit();
 
         res.json({
-        success: true,
-        message: 'Calon customer berhasil disimpan',
-        data: {
-            cc_id: nextId,
-            cc_kode: ccKode,
-        },
+            success: true,
+            message: "Calon customer berhasil disimpan",
+            data: {
+                cc_id: nextId,
+                cc_kode: ccKode,
+            },
         });
-
     } catch (err) {
         await conn.rollback();
         console.error(err);
         res.status(500).json({
-        success: false,
-        message: 'Gagal menyimpan calon customer',
+            success: false,
+            message: "Gagal menyimpan calon customer",
         });
     } finally {
         conn.release();
@@ -93,29 +92,35 @@ const calonCustomer = async (req, res) => {
 
 // Update calon customer
 const updateCalonCustomerByKode = async (req, res) => {
-    const cc_kode = String(req.params.cc_kode || '').trim();
+    const cc_kode = String(req.params.cc_kode || "").trim();
 
-    const cc_nama = String(req.body.cc_nama || '').trim();
-    const cc_kota = String(req.body.cc_kota || '').trim();
-    const cc_alamat = String(req.body.cc_alamat || '').trim();
-    const cc_cp = String(req.body.cc_cp || '').trim();
-    const cc_telp = String(req.body.cc_telp || '').trim();
+    const cc_nama = String(req.body.cc_nama || "").trim();
+    const cc_kota = String(req.body.cc_kota || "").trim();
+    const cc_alamat = String(req.body.cc_alamat || "").trim();
+    const cc_cp = String(req.body.cc_cp || "").trim();
+    const cc_telp = String(req.body.cc_telp || "").trim();
 
     if (!cc_kode) {
-        return res.status(400).json({ success: false, message: 'cc_kode tidak valid' });
+        return res
+            .status(400)
+            .json({ success: false, message: "cc_kode tidak valid" });
     }
     if (!cc_nama) {
-        return res.status(400).json({ success: false, message: 'cc_nama wajib diisi' });
+        return res
+            .status(400)
+            .json({ success: false, message: "cc_nama wajib diisi" });
     }
 
     try {
         const [exist] = await db.query(
-        `SELECT cc_kode FROM tcaloncustomer WHERE cc_kode = ? LIMIT 1`,
-        [cc_kode]
+            `SELECT cc_kode FROM tcaloncustomer WHERE cc_kode = ? LIMIT 1`,
+            [cc_kode],
         );
 
         if (!exist || exist.length === 0) {
-        return res.status(404).json({ success: false, message: 'Data tidak ditemukan' });
+            return res
+                .status(404)
+                .json({ success: false, message: "Data tidak ditemukan" });
         }
 
         const sql = `
@@ -131,31 +136,41 @@ const updateCalonCustomerByKode = async (req, res) => {
         `;
 
         const params = [
-        cc_nama,
-        cc_kota || null,
-        cc_alamat || null,
-        cc_cp || null,
-        cc_telp || null,
-        cc_kode,
+            cc_nama,
+            cc_kota || null,
+            cc_alamat || null,
+            cc_cp || null,
+            cc_telp || null,
+            cc_kode,
         ];
 
         const [result] = await db.query(sql, params);
 
         const [rows] = await db.query(
-        `SELECT cc_kode, cc_nama, cc_alamat, cc_kota, cc_cp, cc_telp
+            `SELECT cc_kode, cc_nama, cc_alamat, cc_kota, cc_cp, cc_telp
         FROM tcaloncustomer
         WHERE cc_kode = ? LIMIT 1`,
-        [cc_kode]
+            [cc_kode],
         );
 
         if (result?.affectedRows === 0) {
-        return res.status(200).json({ success: true, message: 'Tidak ada perubahan', data: rows?.[0] || null });
+            return res.status(200).json({
+                success: true,
+                message: "Tidak ada perubahan",
+                data: rows?.[0] || null,
+            });
         }
 
-        return res.json({ success: true, message: 'Berhasil update', data: rows?.[0] || null });
+        return res.json({
+            success: true,
+            message: "Berhasil update",
+            data: rows?.[0] || null,
+        });
     } catch (err) {
-        console.error('UPDATE CALON CUSTOMER ERROR:', err);
-        return res.status(500).json({ success: false, message: err.sqlMessage || err.message });
+        console.error("UPDATE CALON CUSTOMER ERROR:", err);
+        return res
+            .status(500)
+            .json({ success: false, message: err.sqlMessage || err.message });
     }
 };
 
@@ -165,7 +180,7 @@ const getCabang = async (req, res) => {
 
     try {
         const [cabang] = await db.query(
-            `SELECT cabang AS nama FROM tcabang ORDER BY cbg_kode`
+            `SELECT cabang AS nama FROM tcabang ORDER BY cbg_kode`,
         );
 
         return res.json({
@@ -173,30 +188,33 @@ const getCabang = async (req, res) => {
             data: {
                 user: nama,
                 jabatan,
-                cabang: cabang.map(c => c.nama),
+                cabang: cabang.map((c) => c.nama),
             },
         });
     } catch (err) {
-        console.error('INIT VISIT PLAN ERROR:', err);
-        res.status(500).json({ success: false, message: 'Gagal mengambil data' });
+        console.error("INIT VISIT PLAN ERROR:", err);
+        res.status(500).json({
+            success: false,
+            message: "Gagal mengambil data",
+        });
     }
-}
+};
 
 // Get Pencarian Customer
 const cariCustomer = async (req, res) => {
     try {
-    const search = String(req.query.search ?? "").trim();
+        const search = String(req.query.search ?? "").trim();
 
-    if (!search) {
-        return res.status(400).json({
-            success: false,
-            message: "Parameter search wajib diisi",
-        });
-    }
+        if (!search) {
+            return res.status(400).json({
+                success: false,
+                message: "Parameter search wajib diisi",
+            });
+        }
 
-    const like = `%${search}%`;
-    const [rows] = await db.query(
-    `
+        const like = `%${search}%`;
+        const [rows] = await db.query(
+            `
     SELECT
         x.id,
         x.cc_kode,
@@ -232,16 +250,16 @@ const cariCustomer = async (req, res) => {
         cus_telp                                   AS cc_telp,
         cus_kota                                   AS cc_kota,
         'CUSTOMER'                                 AS sumber
-        FROM tcustomer
+        FROM tcaloncustomer
         WHERE cus_nama LIKE ?
     ) x
     ORDER BY x.cc_nama ASC
     LIMIT 50
     `,
-    [like, like]
-    );
+            [like, like],
+        );
 
-    return res.json({ success: true, data: rows });
+        return res.json({ success: true, data: rows });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
@@ -249,14 +267,23 @@ const cariCustomer = async (req, res) => {
 
 // Post Visit Plan
 const createVisitPlan = async (req, res) => {
-    const cus_kode = String(req.body.cus_kode || '').trim();
-    const user = String(req.body.user || '').trim();
-    const tanggal_plan = String(req.body.tanggal_plan || '').trim().slice(0, 10);
-    const note = String(req.body.note || '').trim();
+    const cus_kode = String(req.body.cus_kode || "").trim();
+    const user = String(req.body.user || "").trim();
+    const tanggal_plan = String(req.body.tanggal_plan || "")
+        .trim()
+        .slice(0, 10);
+    const note = String(req.body.note || "").trim();
 
-    if (!cus_kode) return res.status(400).json({ success: false, message: 'Customer masih belum diisi' });
-    if (!user) return res.status(400).json({ success: false, message: 'User wajib' });
-    if (!tanggal_plan) return res.status(400).json({ success: false, message: 'tanggal_plan wajib' });
+    if (!cus_kode)
+        return res
+            .status(400)
+            .json({ success: false, message: "Customer masih belum diisi" });
+    if (!user)
+        return res.status(400).json({ success: false, message: "User wajib" });
+    if (!tanggal_plan)
+        return res
+            .status(400)
+            .json({ success: false, message: "tanggal_plan wajib" });
 
     const conn = await db.getConnection();
     try {
@@ -264,7 +291,7 @@ const createVisitPlan = async (req, res) => {
 
         // Lock 1 baris plan yang relevan (kalau ada)
         const [exist] = await conn.query(
-        `
+            `
         SELECT id
         FROM tkunjungan
         WHERE user = ?
@@ -274,42 +301,52 @@ const createVisitPlan = async (req, res) => {
         LIMIT 1
         FOR UPDATE
         `,
-        [user, cus_kode, tanggal_plan]
+            [user, cus_kode, tanggal_plan],
         );
 
         if (exist.length > 0) {
-        const id = exist[0].id;
+            const id = exist[0].id;
 
-        // Kalau sudah ada plan, cukup update isiannya (jangan insert baru)
-        await conn.query(
-            `
+            // Kalau sudah ada plan, cukup update isiannya (jangan insert baru)
+            await conn.query(
+                `
             UPDATE tkunjungan
             SET note = ?, tanggal_plan = CONCAT(?, ' 00:00:00')
             WHERE id = ?
             LIMIT 1
             `,
-            [note, tanggal_plan, id]
-        );
+                [note, tanggal_plan, id],
+            );
 
-        await conn.commit();
-        return res.json({ success: true, message: 'Plan sudah ada, diperbarui', data: { id } });
+            await conn.commit();
+            return res.json({
+                success: true,
+                message: "Plan sudah ada, diperbarui",
+                data: { id },
+            });
         }
 
         // Kalau belum ada, insert baru (realisasi default N)
         const [ins] = await conn.query(
-        `
+            `
         INSERT INTO tkunjungan (cus_kode, user, note, tanggal_plan, realisasi)
         VALUES (?, ?, ?, CONCAT(?, ' 00:00:00'), 'N')
         `,
-        [cus_kode, user, note, tanggal_plan]
+            [cus_kode, user, note, tanggal_plan],
         );
 
         await conn.commit();
-        return res.json({ success: true, message: 'Simpan Berhasil', data: { id: ins.insertId } });
+        return res.json({
+            success: true,
+            message: "Simpan Berhasil",
+            data: { id: ins.insertId },
+        });
     } catch (err) {
         await conn.rollback();
-        console.error('CREATE VISIT PLAN ERROR:', err);
-        return res.status(500).json({ success: false, message: err.sqlMessage || err.message });
+        console.error("CREATE VISIT PLAN ERROR:", err);
+        return res
+            .status(500)
+            .json({ success: false, message: err.sqlMessage || err.message });
     } finally {
         conn.release();
     }
@@ -321,14 +358,14 @@ const visitPlanById = async (req, res) => {
 
     if (!user || !tanggal || !cus_kode) {
         return res.status(400).json({
-        success: false,
-        message: 'user, tanggal, cus_kode wajib',
+            success: false,
+            message: "user, tanggal, cus_kode wajib",
         });
     }
 
     try {
         const [rows] = await db.query(
-        `
+            `
         SELECT
             k.id,
             DATE(k.tanggal_plan) AS tanggal_plan,
@@ -348,12 +385,12 @@ const visitPlanById = async (req, res) => {
         ORDER BY (k.realisasi = 'Y') DESC, k.id DESC   -- ✅ DONE dipilih dulu
         LIMIT 1
         `,
-        [user, tanggal, cus_kode]
+            [user, tanggal, cus_kode],
         );
 
         return res.json({ success: true, data: rows?.[0] || null });
     } catch (err) {
-        console.error('GET VISIT PLAN DETAIL ERROR:', err);
+        console.error("GET VISIT PLAN DETAIL ERROR:", err);
         return res.status(500).json({ success: false, message: err.message });
     }
 };
@@ -364,53 +401,60 @@ const updateVisitPlan = async (req, res) => {
     const { tanggal_plan, note, catatan } = req.body;
 
     if (!id) {
-        return res.status(400).json({ success: false, message: 'ID tidak valid' });
+        return res
+            .status(400)
+            .json({ success: false, message: "ID tidak valid" });
     }
 
     if (!tanggal_plan) {
-        return res.status(400).json({ success: false, message: 'tanggal_plan wajib diisi' });
+        return res
+            .status(400)
+            .json({ success: false, message: "tanggal_plan wajib diisi" });
     }
 
     try {
         const [result] = await db.query(
-        `UPDATE tkunjungan
+            `UPDATE tkunjungan
         SET tanggal_plan = CONCAT(?, ' 00:00:00'),
             note = ?,
             catatan = ?
         WHERE id = ?
         `,
-        [
-            String(tanggal_plan),
-            note ?? '',
-            catatan ?? '',
-            id,
-        ]
+            [String(tanggal_plan), note ?? "", catatan ?? "", id],
         );
 
         if (result.affectedRows === 0) {
-        return res.status(404).json({ success: false, message: 'Data tidak ditemukan' });
+            return res
+                .status(404)
+                .json({ success: false, message: "Data tidak ditemukan" });
         }
 
-        return res.json({ success: true, message: 'Update Visit Plan Berhasil', data: { id: Number(id) } });
+        return res.json({
+            success: true,
+            message: "Update Visit Plan Berhasil",
+            data: { id: Number(id) },
+        });
     } catch (err) {
-        console.error('UPDATE VISIT PLAN ERROR:', err);
+        console.error("UPDATE VISIT PLAN ERROR:", err);
         return res.status(500).json({ success: false, message: err.message });
     }
 };
 
 // Post Visit
 const createVisit = async (req, res) => {
-    const user = String(req.body.user || '').trim();
-    const cus_kode = String(req.body.cus_kode || '').trim();
-    const tanggal = String(req.body.tanggal || '').trim(); // YYYY-MM-DD
+    const user = String(req.body.user || "").trim();
+    const cus_kode = String(req.body.cus_kode || "").trim();
+    const tanggal = String(req.body.tanggal || "").trim(); // YYYY-MM-DD
 
-    const note = String(req.body.note || '').trim();
-    const catatan = String(req.body.catatan || '').trim();
+    const note = String(req.body.note || "").trim();
+    const catatan = String(req.body.catatan || "").trim();
     const latitude = req.body.latitude || null;
     const longitude = req.body.longitude || null;
 
     if (!user || !cus_kode || !tanggal) {
-        return res.status(400).json({ success: false, message: 'user, cus_kode, tanggal wajib' });
+        return res
+            .status(400)
+            .json({ success: false, message: "user, cus_kode, tanggal wajib" });
     }
 
     const conn = await db.getConnection();
@@ -419,7 +463,7 @@ const createVisit = async (req, res) => {
 
         // kunci draft agar tidak double insert saat submit bersamaan
         const [draftRows] = await conn.query(
-        `
+            `
         SELECT id
         FROM tkunjungan
         WHERE user = ?
@@ -430,14 +474,14 @@ const createVisit = async (req, res) => {
         LIMIT 1
         FOR UPDATE
         `,
-        [user, cus_kode, tanggal]
+            [user, cus_kode, tanggal],
         );
 
         if (draftRows.length > 0) {
-        const draftId = draftRows[0].id;
+            const draftId = draftRows[0].id;
 
-        await conn.query(
-            `
+            await conn.query(
+                `
             UPDATE tkunjungan
             SET
             latitude = ?,
@@ -450,29 +494,46 @@ const createVisit = async (req, res) => {
             WHERE id = ?
             LIMIT 1
             `,
-            [latitude, longitude, note, catatan, tanggal, tanggal, draftId]
-        );
+                [latitude, longitude, note, catatan, tanggal, tanggal, draftId],
+            );
 
-        await conn.commit();
-        return res.json({ success: true, message: 'Visit tersimpan (UPDATE dari plan)', data: { id: draftId } });
+            await conn.commit();
+            return res.json({
+                success: true,
+                message: "Visit tersimpan (UPDATE dari plan)",
+                data: { id: draftId },
+            });
         }
 
         // kalau tidak ada draft -> insert baru
         const [result] = await conn.query(
-        `
+            `
         INSERT INTO tkunjungan
             (cus_kode, user, latitude, longitude, note, catatan, realisasi, tanggal, tanggal_plan)
         VALUES
             (?, ?, ?, ?, ?, ?, 'Y', CONCAT(?, ' 00:00:00'), CONCAT(?, ' 00:00:00'))
         `,
-        [cus_kode, user, latitude, longitude, note, catatan, tanggal, tanggal]
+            [
+                cus_kode,
+                user,
+                latitude,
+                longitude,
+                note,
+                catatan,
+                tanggal,
+                tanggal,
+            ],
         );
 
         await conn.commit();
-        return res.json({ success: true, message: 'Visit tersimpan (CREATE)', data: { id: result.insertId } });
+        return res.json({
+            success: true,
+            message: "Visit tersimpan (CREATE)",
+            data: { id: result.insertId },
+        });
     } catch (err) {
         await conn.rollback();
-        console.error('CREATE VISIT UPSERT ERROR:', err);
+        console.error("CREATE VISIT UPSERT ERROR:", err);
         return res.status(500).json({ success: false, message: err.message });
     } finally {
         conn.release();
@@ -481,17 +542,21 @@ const createVisit = async (req, res) => {
 
 // Get visit from visit plan
 const getVisitFromPlan = async (req, res) => {
-    const user = String(req.query.user || '').trim();
-    const cus_kode = String(req.query.cus_kode || '').trim();
-    const tanggal = String(req.query.tanggal || '').trim().slice(0, 10); // YYYY-MM-DD
+    const user = String(req.query.user || "").trim();
+    const cus_kode = String(req.query.cus_kode || "").trim();
+    const tanggal = String(req.query.tanggal || "")
+        .trim()
+        .slice(0, 10); // YYYY-MM-DD
 
     if (!user || !cus_kode || !tanggal) {
-        return res.status(400).json({ success: false, message: 'user, cus_kode, tanggal wajib' });
+        return res
+            .status(400)
+            .json({ success: false, message: "user, cus_kode, tanggal wajib" });
     }
 
     try {
         const [rows] = await db.query(
-        `
+            `
         SELECT
             k.id,
             DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
@@ -513,29 +578,33 @@ const getVisitFromPlan = async (req, res) => {
         ORDER BY (k.realisasi='Y') DESC, k.id DESC
         LIMIT 1
         `,
-        [user, cus_kode, tanggal]
+            [user, cus_kode, tanggal],
         );
 
         // kalau tidak ada plan => null
         return res.json({ success: true, data: rows?.[0] || null });
     } catch (err) {
-        console.error('GET VISIT FROM PLAN ERROR:', err);
-        return res.status(500).json({ success: false, message: err.sqlMessage || err.message });
+        console.error("GET VISIT FROM PLAN ERROR:", err);
+        return res
+            .status(500)
+            .json({ success: false, message: err.sqlMessage || err.message });
     }
 };
 
 const getVisitDraft = async (req, res) => {
-    const user = String(req.query.user || '').trim();
-    const cus_kode = String(req.query.cus_kode || '').trim();
-    const tanggal = String(req.query.tanggal || '').trim(); // YYYY-MM-DD
+    const user = String(req.query.user || "").trim();
+    const cus_kode = String(req.query.cus_kode || "").trim();
+    const tanggal = String(req.query.tanggal || "").trim(); // YYYY-MM-DD
 
     if (!user || !cus_kode || !tanggal) {
-        return res.status(400).json({ success: false, message: 'user, cus_kode, tanggal wajib' });
+        return res
+            .status(400)
+            .json({ success: false, message: "user, cus_kode, tanggal wajib" });
     }
 
     try {
         const [rows] = await db.query(
-        `
+            `
         SELECT
             k.id,
             DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
@@ -551,12 +620,12 @@ const getVisitDraft = async (req, res) => {
         ORDER BY k.id DESC
         LIMIT 1
         `,
-        [user, cus_kode, tanggal]
+            [user, cus_kode, tanggal],
         );
 
         return res.json({ success: true, data: rows?.[0] || null });
     } catch (err) {
-        console.error('GET VISIT DRAFT ERROR:', err);
+        console.error("GET VISIT DRAFT ERROR:", err);
         return res.status(500).json({ success: false, message: err.message });
     }
 };
@@ -568,33 +637,33 @@ const updateVisit = async (req, res) => {
 
     if (!id) {
         return res.status(400).json({
-        success: false,
-        message: 'ID kunjungan tidak valid',
+            success: false,
+            message: "ID kunjungan tidak valid",
         });
     }
 
     try {
         await db.query(
-        `UPDATE tkunjungan
+            `UPDATE tkunjungan
         SET latitude = ?, longitude = ?, note = ?, catatan = ?, realisasi = 'Y', tanggal = ?
         WHERE id = ?`,
-        [
-            latitude || null,
-            longitude || null,
-            note || '',
-            catatan || '',
-            tanggal || null,
-            id,
-        ]
+            [
+                latitude || null,
+                longitude || null,
+                note || "",
+                catatan || "",
+                tanggal || null,
+                id,
+            ],
         );
 
         return res.json({
-        success: true,
-        message: 'Update Berhasil',
-        data: { id: Number(id) },
+            success: true,
+            message: "Update Berhasil",
+            data: { id: Number(id) },
         });
     } catch (err) {
-        console.error('UPDATE VISIT ERROR:', err);
+        console.error("UPDATE VISIT ERROR:", err);
         return res.status(500).json({ success: false, message: err.message });
     }
 };
@@ -603,66 +672,88 @@ const updateVisit = async (req, res) => {
 const uploadVisitPhoto = async (req, res) => {
     const { id } = req.params;
 
-    if (!id) return res.status(400).json({ success: false, message: 'ID visit tidak valid' });
-    if (!req.file) return res.status(400).json({ success: false, message: 'File foto tidak ditemukan (req.file kosong)' });
+    if (!id)
+        return res
+            .status(400)
+            .json({ success: false, message: "ID visit tidak valid" });
+    if (!req.file)
+        return res.status(400).json({
+            success: false,
+            message: "File foto tidak ditemukan (req.file kosong)",
+        });
 
     try {
         const relativePath = `/uploads/visits/${req.file.filename}`;
 
-        await db.query(`UPDATE tkunjungan SET foto = ? WHERE id = ?`, [relativePath, id]);
+        await db.query(`UPDATE tkunjungan SET foto = ? WHERE id = ?`, [
+            relativePath,
+            id,
+        ]);
 
         return res.json({
-        success: true,
-        message: 'Foto berhasil disimpan ke server dan database',
-        data: { id: Number(id), filename: req.file.filename },
+            success: true,
+            message: "Foto berhasil disimpan ke server dan database",
+            data: { id: Number(id), filename: req.file.filename },
         });
     } catch (err) {
-        console.error('UPLOAD PHOTO ERROR:', err);
+        console.error("UPLOAD PHOTO ERROR:", err);
         return res.status(500).json({ success: false, message: err.message });
     }
 };
 
 // Get Rekap Visit
 const getRekapVisit = async (req, res) => {
-    const user = String(req.query.user || '').trim();
+    const user = String(req.query.user || "").trim();
 
-    const tanggal = String(req.query.tanggal || '').trim();
-    const tanggalAwal = String(req.query.tanggal_awal || '').trim();
-    const tanggalAkhir = String(req.query.tanggal_akhir || '').trim();
+    const tanggal = String(req.query.tanggal || "").trim();
+    const tanggalAwal = String(req.query.tanggal_awal || "").trim();
+    const tanggalAkhir = String(req.query.tanggal_akhir || "").trim();
 
-    const cabang = String(req.query.cabang || '').trim().toUpperCase();
+    const cabang = String(req.query.cabang || "")
+        .trim()
+        .toUpperCase();
 
     if (!user) {
-        return res.status(400).json({ success: false, message: 'User wajib diisi' });
+        return res
+            .status(400)
+            .json({ success: false, message: "User wajib diisi" });
     }
 
     const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
-    let start = '';
-    let end = '';
+    let start = "";
+    let end = "";
 
     if (tanggal) {
         if (!isYmd(tanggal)) {
-        return res.status(400).json({ success: false, message: 'format tanggal harus YYYY-MM-DD' });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal harus YYYY-MM-DD",
+            });
         }
         start = tanggal;
         end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
         if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-        return res.status(400).json({ success: false, message: 'format tanggal_awal & tanggal_akhir harus YYYY-MM-DD' });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+            });
         }
         start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
         end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
     } else {
         return res.status(400).json({
-        success: false,
-        message: 'Tanggal wajib diisi (tanggal) atau (tanggal_awal & tanggal_akhir)',
+            success: false,
+            message:
+                "Tanggal wajib diisi (tanggal) atau (tanggal_awal & tanggal_akhir)",
         });
     }
 
     try {
-        const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || getPublicBaseUrl(req);
-            let sql = `
+        const PUBLIC_BASE_URL =
+            process.env.PUBLIC_BASE_URL || getPublicBaseUrl(req);
+        let sql = `
             SELECT
             a.id,
             DATE_FORMAT(a.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
@@ -690,56 +781,65 @@ const getRekapVisit = async (req, res) => {
             AND DATE(a.tanggal) <= ?
             `;
 
-            const params = [PUBLIC_BASE_URL, user, start, end];
+        const params = [PUBLIC_BASE_URL, user, start, end];
 
-            if (cabang) {
+        if (cabang) {
             sql += ` AND UPPER(k.kar_cabang) = ?`;
             params.push(cabang);
-            }
+        }
 
-            sql += ` ORDER BY a.tanggal DESC, a.id DESC`;
+        sql += ` ORDER BY a.tanggal DESC, a.id DESC`;
 
         const [rows] = await db.query(sql, params);
 
         return res.json({ success: true, data: rows });
     } catch (err) {
-        console.error('GET REKAP VISIT ERROR:', err);
+        console.error("GET REKAP VISIT ERROR:", err);
         return res.status(500).json({ success: false, message: err.message });
     }
 };
 
 // Rekap visit WA
 const rekapVisitWA = async (req, res) => {
-    const user = String(req.query.user || '').trim();
-    const cabang = String(req.query.cabang || '').trim();
+    const user = String(req.query.user || "").trim();
+    const cabang = String(req.query.cabang || "").trim();
 
-    const tanggal = String(req.query.tanggal || '').trim();
-    const tanggalAwal = String(req.query.tanggal_awal || '').trim();
-    const tanggalAkhir = String(req.query.tanggal_akhir || '').trim();
+    const tanggal = String(req.query.tanggal || "").trim();
+    const tanggalAwal = String(req.query.tanggal_awal || "").trim();
+    const tanggalAkhir = String(req.query.tanggal_akhir || "").trim();
 
     if (!user) {
-        return res.status(400).json({ success: false, message: 'Parameter user wajib diisi' });
+        return res
+            .status(400)
+            .json({ success: false, message: "Parameter user wajib diisi" });
     }
 
     const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
-    let start = '';
-    let end = '';
+    let start = "";
+    let end = "";
 
     if (tanggal) {
-        if (!isYmd(tanggal)) return res.status(400).json({ success: false, message: 'format tanggal harus YYYY-MM-DD' });
+        if (!isYmd(tanggal))
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal harus YYYY-MM-DD",
+            });
         start = tanggal;
         end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
         if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-        return res.status(400).json({ success: false, message: 'format tanggal_awal & tanggal_akhir harus YYYY-MM-DD' });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+            });
         }
         start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
         end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
     } else {
         return res.status(400).json({
-        success: false,
-        message: 'Isi tanggal atau tanggal_awal & tanggal_akhir',
+            success: false,
+            message: "Isi tanggal atau tanggal_awal & tanggal_akhir",
         });
     }
 
@@ -767,8 +867,8 @@ const rekapVisitWA = async (req, res) => {
         const params = [user, start, end];
 
         if (cabang) {
-        sql += ` AND UPPER(ka.kar_cabang) = ?`;
-        params.push(String(cabang).toUpperCase());
+            sql += ` AND UPPER(ka.kar_cabang) = ?`;
+            params.push(String(cabang).toUpperCase());
         }
 
         sql += ` ORDER BY DATE(ku.tanggal) ASC, ku.id ASC`;
@@ -776,7 +876,7 @@ const rekapVisitWA = async (req, res) => {
         const [rows] = await db.query(sql, params);
 
         if (!rows || rows.length === 0) {
-        return res.json({ success: true, wa_text: '' });
+            return res.json({ success: true, wa_text: "" });
         }
 
         const cabangFinal = cabang || rows[0]?.user_cabang;
@@ -784,29 +884,30 @@ const rekapVisitWA = async (req, res) => {
         let text = `*REKAP VISIT*\n`;
         text += `SALES: ${safe(user)}\n`;
         if (cabangFinal) text += `CABANG: ${safe(cabangFinal)}\n`;
-        text += start === end
-        ? `TANGGAL: ${formatTanggalID(String(start))}\n`
-        : `PERIODE: ${formatTanggalID(String(start))} s/d ${formatTanggalID(String(end))}\n`;
+        text +=
+            start === end
+                ? `TANGGAL: ${formatTanggalID(String(start))}\n`
+                : `PERIODE: ${formatTanggalID(String(start))} s/d ${formatTanggalID(String(end))}\n`;
         text += `TOTAL: ${rows.length}\n`;
         text += `_____________________\n\n`;
 
         rows.forEach((it, idx) => {
-        text += `*${idx + 1}. Customer:* ${safe(it.cc_nama)}\n`;
-        text += `*Kode:* ${safe(it.cus_kode)}\n`;
-        text += `*Tanggal Plan:* ${safe(formatTanggalID(it.tanggal_plan))}\n`;
-        text += `*Tanggal Visit:* ${safe(formatTanggalID(it.tanggal_visit))}\n`;
-        text += `*Keperluan:* ${safe(it.catatan)}\n`;
-        text += `*Catatan:* ${safe(it.note)}\n`;
-        text += `*Status:* ${safe(formatStatus(it.realisasi))}\n`;
-        text += `_____________________\n`;
+            text += `*${idx + 1}. Customer:* ${safe(it.cc_nama)}\n`;
+            text += `*Kode:* ${safe(it.cus_kode)}\n`;
+            text += `*Tanggal Plan:* ${safe(formatTanggalID(it.tanggal_plan))}\n`;
+            text += `*Tanggal Visit:* ${safe(formatTanggalID(it.tanggal_visit))}\n`;
+            text += `*Keperluan:* ${safe(it.catatan)}\n`;
+            text += `*Catatan:* ${safe(it.note)}\n`;
+            text += `*Status:* ${safe(formatStatus(it.realisasi))}\n`;
+            text += `_____________________\n`;
         });
 
         return res.json({ success: true, wa_text: text });
     } catch (err) {
-        console.error('REKAP VISIT WA ERROR:', err);
+        console.error("REKAP VISIT WA ERROR:", err);
         return res.status(500).json({
-        success: false,
-        message: err?.message || 'Gagal membuat rekap WA',
+            success: false,
+            message: err?.message || "Gagal membuat rekap WA",
         });
     }
 };
@@ -817,24 +918,26 @@ const updateRekapVisit = async (req, res) => {
     const { note } = req.body;
 
     if (!id) {
-        return res.status(400).json({ success: false, message: 'ID tidak valid' });
+        return res
+            .status(400)
+            .json({ success: false, message: "ID tidak valid" });
     }
 
     try {
-        await db.query(
-            'UPDATE tkunjungan SET note = ? WHERE id = ?',
-            [note, id]
-        );
+        await db.query("UPDATE tkunjungan SET note = ? WHERE id = ?", [
+            note,
+            id,
+        ]);
 
         res.json({
             success: true,
-            message: 'Catatan keperluan berhasil diperbarui'
+            message: "Catatan keperluan berhasil diperbarui",
         });
     } catch (err) {
-        console.error('UPDATE NOTE ERROR:', err);
+        console.error("UPDATE NOTE ERROR:", err);
         res.status(500).json({ success: false, message: err.message });
     }
-}
+};
 
 // Get Rekap visit plan
 const getRekapVisitPlan = async (req, res) => {
@@ -842,8 +945,8 @@ const getRekapVisitPlan = async (req, res) => {
 
     if (!user || !tanggal_awal || !tanggal_akhir) {
         return res.status(400).json({
-        success: false,
-        message: 'Parameter user, tanggal_awal, tanggal_akhir wajib diisi',
+            success: false,
+            message: "Parameter user, tanggal_awal, tanggal_akhir wajib diisi",
         });
     }
 
@@ -881,8 +984,8 @@ const getRekapVisitPlan = async (req, res) => {
         const params = [user, tanggal_awal, tanggal_akhir, user];
 
         if (cabang) {
-        sql += ` AND ka.kar_cabang = ?`;
-        params.push(cabang);
+            sql += ` AND ka.kar_cabang = ?`;
+            params.push(cabang);
         }
 
         sql += ` ORDER BY DATE(k.tanggal_plan) DESC, k.id DESC`;
@@ -890,50 +993,60 @@ const getRekapVisitPlan = async (req, res) => {
         const [rows] = await db.query(sql, params);
         return res.json({ success: true, data: rows || [] });
     } catch (err) {
-        console.error('REKAP VISIT PLAN ERROR:', err);
-        return res.status(500).json({ success: false, message: err.sqlMessage || err.message });
+        console.error("REKAP VISIT PLAN ERROR:", err);
+        return res
+            .status(500)
+            .json({ success: false, message: err.sqlMessage || err.message });
     }
 };
 
 // Rekap visit plan WA
 const rekapVisitPlanWA = async (req, res) => {
-    const user = String(req.query.user || '').trim();
-    const cabang = String(req.query.cabang || '').trim();
+    const user = String(req.query.user || "").trim();
+    const cabang = String(req.query.cabang || "").trim();
 
-    const tanggal = String(req.query.tanggal || '').trim();
-    const tanggalAwal = String(req.query.tanggal_awal || '').trim();
-    const tanggalAkhir = String(req.query.tanggal_akhir || '').trim();
+    const tanggal = String(req.query.tanggal || "").trim();
+    const tanggalAwal = String(req.query.tanggal_awal || "").trim();
+    const tanggalAkhir = String(req.query.tanggal_akhir || "").trim();
 
     if (!user) {
-    return res.status(400).json({ success: false, message: 'Parameter user wajib diisi' });
+        return res
+            .status(400)
+            .json({ success: false, message: "Parameter user wajib diisi" });
     }
 
     const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
-    let start = '';
-    let end = '';
+    let start = "";
+    let end = "";
 
     if (tanggal) {
-    if (!isYmd(tanggal)) {
-        return res.status(400).json({ success: false, message: 'format tanggal harus YYYY-MM-DD' });
-    }
-    start = tanggal;
-    end = tanggal;
+        if (!isYmd(tanggal)) {
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal harus YYYY-MM-DD",
+            });
+        }
+        start = tanggal;
+        end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
-    if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-        return res.status(400).json({ success: false, message: 'format tanggal_awal & tanggal_akhir harus YYYY-MM-DD' });
-    }
-    start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
-    end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
+        if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+            });
+        }
+        start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
+        end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
     } else {
-    return res.status(400).json({
-        success: false,
-        message: 'Isi tanggal atau tanggal_awal & tanggal_akhir',
-    });
+        return res.status(400).json({
+            success: false,
+            message: "Isi tanggal atau tanggal_awal & tanggal_akhir",
+        });
     }
 
     try {
-    let sql = `
+        let sql = `
         SELECT
         k.id,
         DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
@@ -966,62 +1079,69 @@ const rekapVisitPlanWA = async (req, res) => {
         WHERE k.user = ?
     `;
 
-    const params = [user, start, end, user];
+        const params = [user, start, end, user];
 
-    if (cabang) {
-        sql += ` AND UPPER(ka.kar_cabang) = ?`;
-        params.push(String(cabang).toUpperCase());
-    }
-
-    sql += ` ORDER BY DATE(k.tanggal_plan) ASC, k.id ASC`;
-
-    const [rows] = await db.query(sql, params);
-
-    if (!rows || rows.length === 0) {
-        return res.json({ success: true, wa_text: '', message: 'Data kosong' });
-    }
-
-    const cabangFinal = cabang || rows[0]?.user_cabang;
-
-    let text = `*REKAP VISIT PLAN*\n`;
-    text += `SALES: ${safe(user)}\n`;
-    if (cabangFinal) text += `CABANG: ${safe(cabangFinal)}\n`;
-    text += start === end
-        ? `TANGGAL: ${formatTanggalID(String(start))}\n`
-        : `PERIODE: ${formatTanggalID(String(start))} s/d ${formatTanggalID(String(end))}\n`;
-    text += `TOTAL: ${rows.length}\n`;
-    text += `_____________________\n\n`;
-
-    let lastDate = '';
-    rows.forEach((it, idx) => {
-        const tglPlan = String(it.tanggal_plan || '').slice(0, 10);
-
-        text += `*${idx + 1}.*\n`;
-        if (tglPlan && tglPlan !== lastDate) {
-            lastDate = tglPlan;
-            text += `*${formatTanggalID(tglPlan)}*\n`;
+        if (cabang) {
+            sql += ` AND UPPER(ka.kar_cabang) = ?`;
+            params.push(String(cabang).toUpperCase());
         }
 
-        text += `*Customer:* ${safe(it.cc_nama)}\n`;
-        text += `*Kode:* ${safe(it.cus_kode)}\n`;
-        text += `*Kota:* ${safe(it.cc_kota)}\n`;
-        text += `*Alamat:* ${safe(it.cc_alamat)}\n`;
+        sql += ` ORDER BY DATE(k.tanggal_plan) ASC, k.id ASC`;
 
-        // note kamu sebelumnya tulis sebagai "Keperluan" => tetap
-        text += `*Keperluan:* ${safe(it.catatan)}\n`;
+        const [rows] = await db.query(sql, params);
 
-        if (it.catatan && String(it.catatan).trim().length) {
-        text += `*Catatan:* ${safe(it.note)}\n`;
+        if (!rows || rows.length === 0) {
+            return res.json({
+                success: true,
+                wa_text: "",
+                message: "Data kosong",
+            });
         }
 
-        text += `*Status:* ${String(it.realisasi) === 'Y' ? 'Done' : 'Belum'}\n`;
-        text += `_____________________\n`;
-    });
+        const cabangFinal = cabang || rows[0]?.user_cabang;
 
-    return res.json({ success: true, wa_text: text });
+        let text = `*REKAP VISIT PLAN*\n`;
+        text += `SALES: ${safe(user)}\n`;
+        if (cabangFinal) text += `CABANG: ${safe(cabangFinal)}\n`;
+        text +=
+            start === end
+                ? `TANGGAL: ${formatTanggalID(String(start))}\n`
+                : `PERIODE: ${formatTanggalID(String(start))} s/d ${formatTanggalID(String(end))}\n`;
+        text += `TOTAL: ${rows.length}\n`;
+        text += `_____________________\n\n`;
+
+        let lastDate = "";
+        rows.forEach((it, idx) => {
+            const tglPlan = String(it.tanggal_plan || "").slice(0, 10);
+
+            text += `*${idx + 1}.*\n`;
+            if (tglPlan && tglPlan !== lastDate) {
+                lastDate = tglPlan;
+                text += `*${formatTanggalID(tglPlan)}*\n`;
+            }
+
+            text += `*Customer:* ${safe(it.cc_nama)}\n`;
+            text += `*Kode:* ${safe(it.cus_kode)}\n`;
+            text += `*Kota:* ${safe(it.cc_kota)}\n`;
+            text += `*Alamat:* ${safe(it.cc_alamat)}\n`;
+
+            // note kamu sebelumnya tulis sebagai "Keperluan" => tetap
+            text += `*Keperluan:* ${safe(it.catatan)}\n`;
+
+            if (it.catatan && String(it.catatan).trim().length) {
+                text += `*Catatan:* ${safe(it.note)}\n`;
+            }
+
+            text += `*Status:* ${String(it.realisasi) === "Y" ? "Done" : "Belum"}\n`;
+            text += `_____________________\n`;
+        });
+
+        return res.json({ success: true, wa_text: text });
     } catch (e) {
-    console.error('REKAP VISIT PLAN WA ERROR:', e);
-    return res.status(500).json({ success: false, message: e.sqlMessage || e.message });
+        console.error("REKAP VISIT PLAN WA ERROR:", e);
+        return res
+            .status(500)
+            .json({ success: false, message: e.sqlMessage || e.message });
     }
 };
 
@@ -1044,30 +1164,33 @@ const getRekapCalonCustomer = async (req, res) => {
         `;
         const params = [];
 
-        if (cabang && String(cabang).trim() !== '') {
-        query += ` AND cc_kota = ?`;
-        params.push(String(cabang).trim());
+        if (cabang && String(cabang).trim() !== "") {
+            query += ` AND cc_kota = ?`;
+            params.push(String(cabang).trim());
         }
 
-        if (cc_nama && String(cc_nama).trim() !== '') {
-        query += ` AND cc_nama LIKE ?`;
-        params.push(`%${String(cc_nama).trim()}%`);
+        if (cc_nama && String(cc_nama).trim() !== "") {
+            query += ` AND cc_nama LIKE ?`;
+            params.push(`%${String(cc_nama).trim()}%`);
         }
 
         query += ` ORDER BY cc_id DESC`;
 
         // limit default hanya kalau cabang kosong
         const safeLimit = Math.min(Number(limit || 200), 1000); // max 1000
-        if (!cabang || String(cabang).trim() === '') {
-        query += ` LIMIT ?`;
-        params.push(safeLimit);
+        if (!cabang || String(cabang).trim() === "") {
+            query += ` LIMIT ?`;
+            params.push(safeLimit);
         }
 
         const [rows] = await db.query(query, params);
         return res.json({ success: true, data: rows });
     } catch (err) {
-        console.error('GET REKAP CALON CUSTOMER ERROR:', err);
-        return res.status(500).json({ success: false, message: 'Gagal mengambil rekap calon customer' });
+        console.error("GET REKAP CALON CUSTOMER ERROR:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Gagal mengambil rekap calon customer",
+        });
     }
 };
 
@@ -1079,8 +1202,9 @@ const rekapCalonCustomerWA = async (req, res) => {
     const keyword = String(cc_nama || "").trim();
     if (!keyword) {
         return res.status(400).json({
-        success: false,
-        message: "Tentukan Nama Customer \n(agar tidak semua data terkirim)",
+            success: false,
+            message:
+                "Tentukan Nama Customer \n(agar tidak semua data terkirim)",
         });
     }
 
@@ -1128,7 +1252,7 @@ const rekapCalonCustomerWA = async (req, res) => {
             cus_telp  AS cc_telp,
             cus_kota  AS cc_kota,
             'CUSTOMER' AS sumber
-            FROM tcustomer
+            FROM tcaloncustomer
             WHERE cus_nama LIKE ?
             ${cab ? "AND cus_kota = ?" : ""}
         ) x
@@ -1141,11 +1265,11 @@ const rekapCalonCustomerWA = async (req, res) => {
         const [rows] = await db.query(query, params);
 
         if (!rows || rows.length === 0) {
-        return res.json({
-            success: true,
-            wa_text: "",
-            message: "Data tidak ditemukan sesuai filter",
-        });
+            return res.json({
+                success: true,
+                wa_text: "",
+                message: "Data tidak ditemukan sesuai filter",
+            });
         }
 
         const cabangLabel = cab ? cab : "SEMUA";
@@ -1158,25 +1282,25 @@ const rekapCalonCustomerWA = async (req, res) => {
         text += `_____________________\n\n`;
 
         rows.forEach((it, idx) => {
-        text += `*${idx + 1}. ${it.cc_nama || "-"}*\n`;
-        text += `Sumber: ${it.sumber || "-"}\n`;
-        text += `Kode: ${it.cc_kode || it.id || "-"}\n`;
-        text += `Alamat: ${it.cc_alamat || "-"}\n`;
-        text += `CP: ${it.cc_cp || "-"}\n`;
-        text += `Telp: ${it.cc_telp || "-"}\n`;
-        if (it.cc_kota) text += `Kota: ${it.cc_kota}\n`;
-        text += `_____________________\n`;
+            text += `*${idx + 1}. ${it.cc_nama || "-"}*\n`;
+            text += `Sumber: ${it.sumber || "-"}\n`;
+            text += `Kode: ${it.cc_kode || it.id || "-"}\n`;
+            text += `Alamat: ${it.cc_alamat || "-"}\n`;
+            text += `CP: ${it.cc_cp || "-"}\n`;
+            text += `Telp: ${it.cc_telp || "-"}\n`;
+            if (it.cc_kota) text += `Kota: ${it.cc_kota}\n`;
+            text += `_____________________\n`;
         });
 
         return res.json({
-        success: true,
-        wa_text: text,
+            success: true,
+            wa_text: text,
         });
     } catch (err) {
         console.error("REKAP CALON CUSTOMER WA ERROR:", err);
         return res.status(500).json({
-        success: false,
-        message: "Gagal membuat rekap WA",
+            success: false,
+            message: "Gagal membuat rekap WA",
         });
     }
 };
@@ -1187,11 +1311,20 @@ const gantiPassword = async (req, res) => {
 
     // validasi mirip Delphi
     if (!user) {
-        return res.status(400).json({ success: false, message: 'User belum ada (login dulu)' });
+        return res
+            .status(400)
+            .json({ success: false, message: "User belum ada (login dulu)" });
     }
 
-    if (!oldPassword || oldPassword.length < 3 || !newPassword || newPassword.length < 3) {
-        return res.status(400).json({ success: false, message: 'Data belum lengkap.' });
+    if (
+        !oldPassword ||
+        oldPassword.length < 3 ||
+        !newPassword ||
+        newPassword.length < 3
+    ) {
+        return res
+            .status(400)
+            .json({ success: false, message: "Data belum lengkap." });
     }
 
     try {
@@ -1200,48 +1333,56 @@ const gantiPassword = async (req, res) => {
             FROM tkaryawan 
             WHERE kar_isaktif = 1 AND kar_nama = ?
             LIMIT 1`,
-            [user]
+            [user],
         );
 
         if (!rows || rows.length === 0) {
-            return res.status(404).json({ success: false, message: 'User tidak ditemukan / tidak aktif' });
+            return res.status(404).json({
+                success: false,
+                message: "User tidak ditemukan / tidak aktif",
+            });
         }
 
         const currentPassword = rows[0].kar_password;
 
         if (oldPassword !== currentPassword) {
-            return res.status(400).json({ success: false, message: 'Password lama salah.' });
+            return res
+                .status(400)
+                .json({ success: false, message: "Password lama salah." });
         }
 
         if (newPassword.length < 3) {
-            return res.status(400).json({ success: false, message: 'Password baru tidak valid.' });
+            return res.status(400).json({
+                success: false,
+                message: "Password baru tidak valid.",
+            });
         }
 
         // update password
         await db.query(
-        `UPDATE tkaryawan SET kar_password = ? WHERE kar_nama = ?`,
-        [newPassword, user]
+            `UPDATE tkaryawan SET kar_password = ? WHERE kar_nama = ?`,
+            [newPassword, user],
         );
 
         return res.json({
-        success: true,
-        message: 'Perubahan password berhasil.',
-        data: { forceLogout: true },
+            success: true,
+            message: "Perubahan password berhasil.",
+            data: { forceLogout: true },
         });
     } catch (err) {
-        console.error('CHANGE PASSWORD ERROR:', err);
+        console.error("CHANGE PASSWORD ERROR:", err);
         return res.status(500).json({ success: false, message: err.message });
     }
-}
+};
 
 // Get nama karyawan
 const getUser = async (req, res) => {
     const { cabang } = req.query;
 
     if (!cabang) {
-        return res.status(400).json({ 
-            success: false, 
-            message: 'Parameter cabang wajib diisi' 
+        return res.status(400).json({
+            success: false,
+            message: "Parameter cabang wajib diisi",
         });
     }
 
@@ -1251,38 +1392,37 @@ const getUser = async (req, res) => {
                 FROM tkaryawan 
                 WHERE kar_isaktif = 1 
                 AND kar_jabatan = 'SALES' 
-                AND kar_cabang = ?`, 
-            [cabang] 
+                AND kar_cabang = ?`,
+            [cabang],
         );
 
         return res.json({
             success: true,
             count: rows.length,
-            data: rows
+            data: rows,
         });
-
     } catch (err) {
-        console.error('ERROR GET SALES BY CABANG:', err);
-        return res.status(500).json({ 
-            success: false, 
-            message: 'Gagal mengambil data sales' 
+        console.error("ERROR GET SALES BY CABANG:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Gagal mengambil data sales",
         });
     }
 };
 
 module.exports = {
-    calonCustomer, 
+    calonCustomer,
     updateCalonCustomerByKode,
-    cariCustomer, 
-    getCabang, 
-    createVisitPlan, 
+    cariCustomer,
+    getCabang,
+    createVisitPlan,
     visitPlanById,
     updateVisitPlan,
-    createVisit, 
+    createVisit,
     getVisitFromPlan,
     getVisitDraft,
-    updateVisit, 
-    uploadVisitPhoto, 
+    updateVisit,
+    uploadVisitPhoto,
     getRekapVisit,
     rekapVisitWA,
     updateRekapVisit,
@@ -1291,5 +1431,5 @@ module.exports = {
     getRekapCalonCustomer,
     rekapCalonCustomerWA,
     gantiPassword,
-    getUser
-}
+    getUser,
+};
