@@ -789,7 +789,7 @@ const getRekapVisit = async (req, res) => {
             END AS foto_url
             FROM tkunjungan a
             LEFT JOIN tcaloncustomer b ON b.cc_kode = a.cus_kode
-            LEFT JOIN tkaryawan k ON k.kar_nama = a.user
+            LEFT JOIN tkaryawan k ON k.kar_nama = a.user AND k.kar_isaktif = 1
             WHERE a.user = ?
             AND a.realisasi = 'Y'
             AND DATE(a.tanggal) >= ?
@@ -997,7 +997,7 @@ const getRekapVisitPlan = async (req, res) => {
         JOIN tkunjungan k ON k.id = p.pick_id
         LEFT JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
         LEFT JOIN tcustomer cus ON cus.cus_kode = k.cus_kode
-        INNER JOIN tkaryawan ka ON ka.kar_nama = k.user
+        INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
         `;
 
@@ -1101,7 +1101,7 @@ const rekapVisitPlanWA = async (req, res) => {
         GROUP BY t.user, DATE(t.tanggal_plan), t.cus_kode
         ) p ON p.pick_id = k.id
         INNER JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
-        LEFT JOIN tkaryawan ka ON ka.kar_nama = k.user
+        LEFT JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
     `;
 
