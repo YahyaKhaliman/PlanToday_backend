@@ -154,13 +154,11 @@ const updateCalonCustomerByKode = async (req, res) => {
         );
 
         if (result?.affectedRows === 0) {
-            return res
-                .status(200)
-                .json({
-                    success: true,
-                    message: "Tidak ada perubahan",
-                    data: rows?.[0] || null,
-                });
+            return res.status(200).json({
+                success: true,
+                message: "Tidak ada perubahan",
+                data: rows?.[0] || null,
+            });
         }
 
         return res.json({
@@ -267,6 +265,14 @@ const cariCustomer = async (req, res) => {
     }
 };
 
+const logVisitPlanAction = (action, payload) => {
+    try {
+        console.info(`VISIT_PLAN_${action.toUpperCase()}`, payload);
+    } catch (_) {
+        /* noop logging fallback */
+    }
+};
+
 // Post Visit Plan
 const createVisitPlan = async (req, res) => {
     const cus_kode = String(req.body.cus_kode || "").trim();
@@ -321,10 +327,11 @@ const createVisitPlan = async (req, res) => {
             );
 
             await conn.commit();
+            logVisitPlanAction("update", { user, cus_kode, tanggal_plan, id });
             return res.json({
                 success: true,
                 message: "Plan sudah ada, diperbarui",
-                data: { id },
+                data: { id, isUpdate: true },
             });
         }
 
@@ -338,10 +345,16 @@ const createVisitPlan = async (req, res) => {
         );
 
         await conn.commit();
+        logVisitPlanAction("insert", {
+            user,
+            cus_kode,
+            tanggal_plan,
+            id: ins.insertId,
+        });
         return res.json({
             success: true,
             message: "Simpan Berhasil",
-            data: { id: ins.insertId },
+            data: { id: ins.insertId, isUpdate: false },
         });
     } catch (err) {
         await conn.rollback();
@@ -679,12 +692,10 @@ const uploadVisitPhoto = async (req, res) => {
             .status(400)
             .json({ success: false, message: "ID visit tidak valid" });
     if (!req.file)
-        return res
-            .status(400)
-            .json({
-                success: false,
-                message: "File foto tidak ditemukan (req.file kosong)",
-            });
+        return res.status(400).json({
+            success: false,
+            message: "File foto tidak ditemukan (req.file kosong)",
+        });
 
     try {
         const relativePath = `/uploads/visits/${req.file.filename}`;
@@ -730,24 +741,19 @@ const getRekapVisit = async (req, res) => {
 
     if (tanggal) {
         if (!isYmd(tanggal)) {
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message: "format tanggal harus YYYY-MM-DD",
-                });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal harus YYYY-MM-DD",
+            });
         }
         start = tanggal;
         end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
         if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message:
-                        "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
-                });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+            });
         }
         start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
         end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
@@ -830,23 +836,18 @@ const rekapVisitWA = async (req, res) => {
 
     if (tanggal) {
         if (!isYmd(tanggal))
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message: "format tanggal harus YYYY-MM-DD",
-                });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal harus YYYY-MM-DD",
+            });
         start = tanggal;
         end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
         if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message:
-                        "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
-                });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+            });
         }
         start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
         end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
@@ -953,6 +954,12 @@ const updateRekapVisit = async (req, res) => {
     }
 };
 
+const logRekapDebug = (tag, payload) => {
+    try {
+        console.info(`[REKAP_VISIT_PLAN] ${tag}`, payload);
+    } catch (_) {}
+};
+
 // Get Rekap visit plan
 const getRekapVisitPlan = async (req, res) => {
     const { user, cabang, tanggal_awal, tanggal_akhir } = req.query;
@@ -966,6 +973,16 @@ const getRekapVisitPlan = async (req, res) => {
 
     try {
         let sql = `
+        WITH pick AS (
+            SELECT
+                cus_kode,
+                DATE(tanggal_plan) AS tgl,
+                MAX(id) AS pick_id
+            FROM tkunjungan
+            WHERE user = ?
+                AND DATE(tanggal_plan) BETWEEN ? AND ?
+            GROUP BY cus_kode, DATE(tanggal_plan)
+        )
         SELECT
             k.id,
             DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
@@ -973,24 +990,13 @@ const getRekapVisitPlan = async (req, res) => {
             k.note,
             k.catatan,
             k.realisasi,
-            c.cc_nama,
-            c.cc_alamat,
-            c.cc_kota
-        FROM tkunjungan k
-        JOIN (
-            SELECT
-            cus_kode,
-            DATE(tanggal_plan) AS tgl,
-            COALESCE(
-                MAX(CASE WHEN realisasi = 'Y' THEN id END),
-                MAX(id)
-            ) AS pick_id
-            FROM tkunjungan
-            WHERE user = ?
-            AND DATE(tanggal_plan) BETWEEN ? AND ?
-            GROUP BY cus_kode, DATE(tanggal_plan)
-        ) p ON p.pick_id = k.id
-        INNER JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
+            COALESCE(c.cc_nama, cus.cus_nama) AS cc_nama,
+            COALESCE(c.cc_alamat, cus.cus_alamat) AS cc_alamat,
+            COALESCE(c.cc_kota, cus.cus_kota) AS cc_kota
+        FROM pick p
+        JOIN tkunjungan k ON k.id = p.pick_id
+        LEFT JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
+        LEFT JOIN tcustomer cus ON cus.cus_kode = k.cus_kode
         INNER JOIN tkaryawan ka ON ka.kar_nama = k.user
         WHERE k.user = ?
         `;
@@ -1005,6 +1011,12 @@ const getRekapVisitPlan = async (req, res) => {
         sql += ` ORDER BY DATE(k.tanggal_plan) DESC, k.id DESC`;
 
         const [rows] = await db.query(sql, params);
+        logRekapDebug("fetch", {
+            user,
+            tanggal_awal,
+            tanggal_akhir,
+            total: rows?.length || 0,
+        });
         return res.json({ success: true, data: rows || [] });
     } catch (err) {
         console.error("REKAP VISIT PLAN ERROR:", err);
@@ -1036,24 +1048,19 @@ const rekapVisitPlanWA = async (req, res) => {
 
     if (tanggal) {
         if (!isYmd(tanggal)) {
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message: "format tanggal harus YYYY-MM-DD",
-                });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal harus YYYY-MM-DD",
+            });
         }
         start = tanggal;
         end = tanggal;
     } else if (tanggalAwal && tanggalAkhir) {
         if (!isYmd(tanggalAwal) || !isYmd(tanggalAkhir)) {
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message:
-                        "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
-                });
+            return res.status(400).json({
+                success: false,
+                message: "format tanggal_awal & tanggal_akhir harus YYYY-MM-DD",
+            });
         }
         start = tanggalAwal <= tanggalAkhir ? tanggalAwal : tanggalAkhir;
         end = tanggalAwal <= tanggalAkhir ? tanggalAkhir : tanggalAwal;
@@ -1206,12 +1213,10 @@ const getRekapCalonCustomer = async (req, res) => {
         return res.json({ success: true, data: rows });
     } catch (err) {
         console.error("GET REKAP CALON CUSTOMER ERROR:", err);
-        return res
-            .status(500)
-            .json({
-                success: false,
-                message: "Gagal mengambil rekap calon customer",
-            });
+        return res.status(500).json({
+            success: false,
+            message: "Gagal mengambil rekap calon customer",
+        });
     }
 };
 
@@ -1358,12 +1363,10 @@ const gantiPassword = async (req, res) => {
         );
 
         if (!rows || rows.length === 0) {
-            return res
-                .status(404)
-                .json({
-                    success: false,
-                    message: "User tidak ditemukan / tidak aktif",
-                });
+            return res.status(404).json({
+                success: false,
+                message: "User tidak ditemukan / tidak aktif",
+            });
         }
 
         const currentPassword = rows[0].kar_password;
@@ -1375,12 +1378,10 @@ const gantiPassword = async (req, res) => {
         }
 
         if (newPassword.length < 3) {
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message: "Password baru tidak valid.",
-                });
+            return res.status(400).json({
+                success: false,
+                message: "Password baru tidak valid.",
+            });
         }
 
         // update password
