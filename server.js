@@ -29,5 +29,5 @@ app.use("/api", require("./routes/homeRoute"));
 app.use("/api", require("./routes/kurirRoute"));
 
 app.listen(process.env.PORT, "0.0.0.0", () => {
-    console.log(`Server PlanToday running in tes: ${process.env.PORT}`);
+    console.log(`Server PlanToday running in: ${process.env.PORT}`);
 });
