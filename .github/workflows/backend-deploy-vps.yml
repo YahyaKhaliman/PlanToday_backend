@@ -1,0 +1,42 @@
+name: Backend Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-deploy-vps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy and restart backend
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/PlanToday_backend
+            git fetch origin
+            git reset --hard origin/main
+            npm ci
+            pm2 restart plantoday-api
+            echo "Backend deployed and restarted successfully"
+
+      - name: Publish summary
+        run: |
+          echo "✓ Code pulled from GitHub" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Dependencies updated (npm ci)" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Backend restarted (pm2 restart plantoday-api)" >> $GITHUB_STEP_SUMMARY
