@@ -1,5 +1,7 @@
 const db = require("../config/dbMain");
 const jwt = require("jsonwebtoken");
+const auth = require("../middleware/auth");
+const { resolveSalesIdentity } = require("../utils/salesIdentityResolver");
 
 const login = async (req, res) => {
     const { username, password, deviceId, versiApp } = req.body;
@@ -30,6 +32,14 @@ const login = async (req, res) => {
         }
 
         const user = rows[0];
+        const resolvedSales = await resolveSalesIdentity({
+            loginUser: {
+                id: user.id,
+                nama: user.kar_nama,
+                jabatan: user.kar_jabatan,
+                cabang: user.kar_cabang,
+            },
+        });
 
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
             expiresIn: "7d",
@@ -51,6 +61,8 @@ const login = async (req, res) => {
                 nama: user.kar_nama,
                 jabatan: user.kar_jabatan,
                 cabang: user.kar_cabang,
+                sales_kode: resolvedSales?.sales_kode || "",
+                sales_nama: resolvedSales?.sales_nama || "",
             },
         });
     } catch (err) {
@@ -61,6 +73,23 @@ const login = async (req, res) => {
         });
     }
 };
+
+const profile = [
+    auth,
+    async (req, res) => {
+        return res.status(200).json({
+            success: true,
+            user: {
+                id: req.user?.id,
+                nama: req.user?.nama,
+                jabatan: req.user?.jabatan,
+                cabang: req.user?.cabang,
+                sales_kode: req.user?.sales_kode || "",
+                sales_nama: req.user?.sales_nama || "",
+            },
+        });
+    },
+];
 
 const register = async (req, res) => {
     const { nama, password, cabang, jabatan, deviceId } = req.body;
@@ -156,4 +185,4 @@ const checkDevice = async (req, res) => {
     }
 };
 
-module.exports = { login, register, checkDevice };
+module.exports = { login, register, checkDevice, profile };

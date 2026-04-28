@@ -1,4 +1,108 @@
+const { createHash } = require("crypto");
 const db = require("../config/dbPenawaran");
+const { resolveSalesIdentity } = require("../utils/salesIdentityResolver");
+
+const CREATE_PENAWARAN_DEDUPE_TTL_MS = 30 * 1000;
+const createPenawaranInFlight = new Map();
+
+const buildCreatePenawaranFingerprint = ({
+    tanggal,
+    divisi,
+    tipe,
+    perusahaanKode,
+    customerKode,
+    salesKode,
+    keterangan,
+    note,
+    details,
+}) => {
+    const normalized = {
+        tanggal: String(tanggal || "").trim(),
+        divisi: String(divisi || "").trim(),
+        tipe: String(tipe || "").trim(),
+        perusahaanKode: String(perusahaanKode || "").trim(),
+        customerKode: String(customerKode || "").trim(),
+        salesKode: String(salesKode || "").trim(),
+        keterangan: String(keterangan || "").trim(),
+        note: String(note || "").trim(),
+        details: (Array.isArray(details) ? details : []).map((d) => ({
+            minta: String(d?.minta || "").trim(),
+            nama_barang: String(d?.nama_barang || "").trim(),
+            bahan: String(d?.bahan || "").trim(),
+            ukuran: String(d?.ukuran || "").trim(),
+            panjang: toNumber(d?.panjang, 0),
+            lebar: toNumber(d?.lebar, 0),
+            satuan: String(d?.satuan || "PCS").trim() || "PCS",
+            qty: toNumber(d?.qty, 0),
+            harga: toNumber(d?.harga, 0),
+        })),
+    };
+
+    return createHash("sha1").update(JSON.stringify(normalized)).digest("hex");
+};
+
+const cleanCreatePenawaranLocks = () => {
+    const now = Date.now();
+    for (const [key, value] of createPenawaranInFlight.entries()) {
+        if (!value || value.expiresAt <= now) {
+            createPenawaranInFlight.delete(key);
+        }
+    }
+};
+
+const acquireCreatePenawaranLock = ({ fingerprint, traceId }) => {
+    cleanCreatePenawaranLocks();
+
+    const now = Date.now();
+    const existing = createPenawaranInFlight.get(fingerprint);
+    if (existing && existing.expiresAt > now) {
+        return {
+            acquired: false,
+            traceId,
+            inFlightTraceId: existing.traceId,
+        };
+    }
+
+    createPenawaranInFlight.set(fingerprint, {
+        traceId,
+        expiresAt: now + CREATE_PENAWARAN_DEDUPE_TTL_MS,
+    });
+
+    return { acquired: true, traceId };
+};
+
+const releaseCreatePenawaranLock = ({ fingerprint, traceId }) => {
+    const existing = createPenawaranInFlight.get(fingerprint);
+    if (!existing) return;
+    if (existing.traceId !== traceId) return;
+    createPenawaranInFlight.delete(fingerprint);
+};
+
+const buildDetailDedupKey = (detail) => {
+    const normalized = {
+        minta: String(detail?.minta || "")
+            .trim()
+            .toUpperCase(),
+        nama_barang: String(detail?.nama_barang || "")
+            .trim()
+            .toUpperCase(),
+        bahan: String(detail?.bahan || "")
+            .trim()
+            .toUpperCase(),
+        ukuran: String(detail?.ukuran || "")
+            .trim()
+            .toUpperCase(),
+        panjang: toNumber(detail?.panjang, 0),
+        lebar: toNumber(detail?.lebar, 0),
+        satuan: String(detail?.satuan || "PCS")
+            .trim()
+            .toUpperCase(),
+        qty: toNumber(detail?.qty, 0),
+        harga: toNumber(detail?.harga, 0),
+    };
+
+    return JSON.stringify(normalized);
+};
 
 const normalizeDate = (value) => {
     if (!value) return null;
@@ -50,6 +154,69 @@ const toNumber = (value, fallback = 0) => {
     return Number.isFinite(num) ? num : fallback;
 };
 
+const limitText = (value, maxLen) => {
+    const text = String(value || "");
+    const length = toNumber(maxLen, 0);
+    if (length <= 0) return text;
+    if (text.length <= length) return text;
+    return text.slice(0, length);
+};
+
+const isManagerUser = (user) =>
+    String(user?.jabatan || "")
+        .trim()
+        .toUpperCase() === "MANAGER";
+
+const normalizePerusahaanLookupKey = (value) =>
+    String(value || "")
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "");
+
+const PENAWARAN_TTD_MAP = {
+    [normalizePerusahaanLookupKey("CV.Kencana Print")]: {
+        ttd: "Tri Yuliani, S.I.Kom",
+        ttd_jabatan: "Supervisor Office Marketing",
+    },
+    [normalizePerusahaanLookupKey("PT.Jaya Abadi Mulia")]: {
+        ttd: "Widi Hariyanto",
+        ttd_jabatan: "Manager Marketing",
+    },
+    [normalizePerusahaanLookupKey("PT. Madani Production")]: {
+        ttd: "Ariyani Trikusumastuti, S.E.",
+        ttd_jabatan: "Chief Marketing Officer",
+    },
+    [normalizePerusahaanLookupKey("Retailer")]: {
+        ttd: "",
+        ttd_jabatan: "",
+    },
+    [normalizePerusahaanLookupKey("Sukiman")]: {
+        ttd: "",
+        ttd_jabatan: "",
+    },
+};
+
+const getTtdMappingByPerusahaanNama = (perusahaanNama) => {
+    const key = normalizePerusahaanLookupKey(perusahaanNama);
+    return PENAWARAN_TTD_MAP[key] || { ttd: "", ttd_jabatan: "" };
+};
+
+const getTtdMappingByPerusahaanKode = async (conn, perusahaanKode) => {
+    if (!perusahaanKode) return { ttd: "", ttd_jabatan: "" };
+    const [rows] = await conn.query(
+        `
+        SELECT COALESCE(perush_nama, '') AS perush_nama
+        FROM tperusahaan
+        WHERE perush_kode = ?
+        LIMIT 1
+        `,
+        [perusahaanKode],
+    );
+
+    const perusahaanNama = String(rows?.[0]?.perush_nama || "");
+    return getTtdMappingByPerusahaanNama(perusahaanNama);
+};
+
 const normalizeApprovalState = (value) =>
     String(value || "")
         .trim()
@@ -92,34 +259,140 @@ const getNextPinUrut = async (conn, pinTrs, nomor) => {
 const writeStatusAuditLog = async ({ conn, nomor, user, changes }) => {
     if (!Array.isArray(changes) || changes.length === 0) return;
 
-    const pinUrut = await getNextPinUrut(conn, "PENAWARAN_STATUS", nomor);
-    const payload = JSON.stringify({ changes });
+    const pinTrs = "PENAWARAN_STATUS";
+    const pinUrut = await getNextPinUrut(conn, pinTrs, nomor);
+    const normalizedUser = String(user || "MOBILE").trim() || "MOBILE";
+    const userMinta = normalizedUser;
+    const shortUserPin = "SISTEM";
+
+    const statusSummary = changes
+        .map((item) => {
+            const id = String(item?.id || "").trim();
+            const beforeStatus = String(item?.before?.status || "-")
+                .trim()
+                .toUpperCase();
+            const afterStatus = String(item?.after?.status || "-")
+                .trim()
+                .toUpperCase();
+            return `${id}:${beforeStatus}->${afterStatus}`;
+        })
+        .join(", ");
+
+    const pinKetSummary = limitText(
+        `Update status detail (${changes.length} item): ${statusSummary}`,
+        120,
+    );
+
+    const firstMainReason = limitText(
+        changes
+            .map((item) =>
+                String(
+                    item?.after?.ket_batal || item?.after?.ket_confirm || "",
+                ).trim(),
+            )
+            .find((v) => v) || "",
+        255,
+    );
+
+    const hasPinProgram = await hasTableColumn(
+        conn,
+        "tspk_pin5",
+        "pin_program",
+    );
+    const hasPinTglTrs = await hasTableColumn(conn, "tspk_pin5", "pin_tgl_trs");
+    const hasPinKet = await hasTableColumn(conn, "tspk_pin5", "pin_ket");
+    const hasPinTglMinta = await hasTableColumn(
+        conn,
+        "tspk_pin5",
+        "pin_tgl_minta",
+    );
+    const hasPinUserMinta = await hasTableColumn(
+        conn,
+        "tspk_pin5",
+        "pin_user_minta",
+    );
+    const hasPinTglPin = await hasTableColumn(conn, "tspk_pin5", "pin_tgl_pin");
+    const hasPinUserPin = await hasTableColumn(
+        conn,
+        "tspk_pin5",
+        "pin_user_pin",
+    );
+    const hasPinAcc = await hasTableColumn(conn, "tspk_pin5", "pin_acc");
+    const hasPinDipakai = await hasTableColumn(
+        conn,
+        "tspk_pin5",
+        "pin_dipakai",
+    );
+    const hasPinAlasan = await hasTableColumn(conn, "tspk_pin5", "pin_alasan");
+
+    const insertColumns = ["pin_trs", "pin_nomor", "pin_urut"];
+    const insertValues = [pinTrs, nomor, pinUrut];
+    const insertPlaceholders = ["?", "?", "?"];
+
+    if (hasPinProgram) {
+        insertColumns.push("pin_program");
+        insertValues.push("MOBILE");
+        insertPlaceholders.push("?");
+    }
+
+    if (hasPinTglTrs) {
+        insertColumns.push("pin_tgl_trs");
+        insertValues.push(new Date());
+        insertPlaceholders.push("?");
+    }
+
+    if (hasPinKet) {
+        insertColumns.push("pin_ket");
+        insertValues.push(pinKetSummary);
+        insertPlaceholders.push("?");
+    }
+
+    if (hasPinTglMinta) {
+        insertColumns.push("pin_tgl_minta");
+        insertPlaceholders.push("NOW()");
+    }
+
+    if (hasPinUserMinta) {
+        insertColumns.push("pin_user_minta");
+        insertValues.push(userMinta);
+        insertPlaceholders.push("?");
+    }
+
+    if (hasPinTglPin) {
+        insertColumns.push("pin_tgl_pin");
+        insertPlaceholders.push("NOW()");
+    }
+
+    if (hasPinUserPin) {
+        insertColumns.push("pin_user_pin");
+        insertValues.push(shortUserPin);
+        insertPlaceholders.push("?");
+    }
+
+    if (hasPinAcc) {
+        insertColumns.push("pin_acc");
+        insertValues.push("Y");
+        insertPlaceholders.push("?");
+    }
+
+    if (hasPinDipakai) {
+        insertColumns.push("pin_dipakai");
+        insertValues.push("Y");
+        insertPlaceholders.push("?");
+    }
+
+    if (hasPinAlasan) {
+        insertColumns.push("pin_alasan");
+        insertValues.push(firstMainReason);
+        insertPlaceholders.push("?");
+    }
 
     await conn.query(
         `
-        INSERT INTO tspk_pin5 (
-            pin_trs,
-            pin_nomor,
-            pin_urut,
-            pin_program,
-            pin_tgl_trs,
-            pin_ket,
-            pin_tgl_minta,
-            pin_user_minta,
-            pin_acc,
-            pin_dipakai,
-            pin_alasan
-        ) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, '', '', '')
+        INSERT INTO tspk_pin5 (${insertColumns.join(", ")})
+        VALUES (${insertPlaceholders.join(", ")})
         `,
-        [
-            "PENAWARAN_STATUS",
-            nomor,
-            pinUrut,
-            "MOBILE",
-            new Date(),
-            payload,
-            String(user || "MOBILE").slice(0, 10),
-        ],
+        insertValues,
     );
 };
 
@@ -127,6 +400,7 @@ const SCHEMA_CACHE_TTL_MS = 60 * 1000;
 let schemaCache = {
     checkedAt: 0,
     tables: new Set(),
+    columns: new Map(),
 };
 
 const getAvailableTables = async () => {
@@ -143,9 +417,42 @@ const getAvailableTables = async () => {
     schemaCache = {
         checkedAt: now,
         tables: tableSet,
+        columns: new Map(),
     };
 
     return tableSet;
+};
+
+const hasTableColumn = async (conn, tableName, columnName) => {
+    const tableKey = String(tableName || "")
+        .trim()
+        .toLowerCase();
+    const columnKey = String(columnName || "")
+        .trim()
+        .toLowerCase();
+    if (!tableKey || !columnKey) return false;
+
+    const now = Date.now();
+    if (now - schemaCache.checkedAt >= SCHEMA_CACHE_TTL_MS) {
+        await getAvailableTables();
+    }
+
+    if (!schemaCache.tables.has(tableKey)) {
+        return false;
+    }
+
+    const cachedColumns = schemaCache.columns.get(tableKey);
+    if (cachedColumns) {
+        return cachedColumns.has(columnKey);
+    }
+
+    const [rows] = await conn.query(`SHOW COLUMNS FROM ${tableKey}`);
+    const colSet = new Set(
+        (rows || []).map((row) => String(row?.Field || "").toLowerCase()),
+    );
+    schemaCache.columns.set(tableKey, colSet);
+
+    return colSet.has(columnKey);
 };
 
 const ensurePenawaranSchema = async (res) => {
@@ -454,12 +761,21 @@ const getPenawaranDetail = async (req, res) => {
 
 const createPenawaran = async (req, res) => {
     let conn;
+    let lockState = null;
 
     try {
         const schemaReady = await ensurePenawaranSchema(res);
         if (!schemaReady) return;
 
         conn = await db.getConnection();
+
+        const traceId =
+            String(
+                req.headers["x-request-id"] ||
+                    req.headers["x-idempotency-key"] ||
+                    req.body?.client_request_id ||
+                    `penawaran-${Date.now()}`,
+            ).trim() || `penawaran-${Date.now()}`;
 
         const body = req.body || {};
         const tanggal =
@@ -469,13 +785,93 @@ const createPenawaran = async (req, res) => {
         const tipe = String(body.tipe || "Medium").trim() || "Medium";
         const perusahaanKode = String(body.perusahaan_kode || "").trim();
         const customerKode = String(body.customer_kode || "").trim();
-        const salesKode = String(body.sales_kode || "").trim();
+        const salesKode = String(
+            body.sales_kode || body.sal_kode || body.sales_id || body.id || "",
+        ).trim();
+        const up = String(body.up || "");
+        const incomingTtd = String(body.ttd || "").trim();
+        const incomingTtdJabatan = String(body.ttd_jabatan || "").trim();
         const keterangan = String(body.keterangan || "").trim();
         const note = String(body.note || "").trim();
         const userCreate =
             String(body.user || body.user_create || "MOBILE").trim() ||
             "MOBILE";
         const details = Array.isArray(body.details) ? body.details : [];
+
+        const dedupedDetails = [];
+        const detailSeen = new Set();
+        let duplicateDetailCount = 0;
+        for (let i = 0; i < details.length; i += 1) {
+            const d = details[i] || {};
+            const key = buildDetailDedupKey(d);
+            if (detailSeen.has(key)) {
+                duplicateDetailCount += 1;
+                continue;
+            }
+            detailSeen.add(key);
+            dedupedDetails.push(d);
+        }
+
+        console.log("[PenawaranCreate][API] incoming", {
+            traceId,
+            incomingDetails: details.length,
+            dedupedDetails: dedupedDetails.length,
+            duplicateDetailCount,
+            tanggal,
+            divisi,
+            perusahaanKode,
+            customerKode,
+            salesKode,
+        });
+
+        // Source of truth create penawaran:
+        // 1) explicit sales_kode request diprioritaskan jika valid aktif
+        // 2) jika explicit kosong/tidak valid, fallback utama ke resolver NIK login
+        const resolvedSales = await resolveSalesIdentity({
+            loginUser: req.user || {},
+            explicitSalesKode: salesKode,
+            allowLegacyFallback: false,
+        });
+        const finalSales = resolvedSales?.sales_kode
+            ? {
+                  sales_kode: resolvedSales.sales_kode,
+                  sales_nama: resolvedSales.sales_nama,
+              }
+            : null;
+        const finalSalesSource = String(resolvedSales?.source || "").trim();
+
+        const ttdFallback = await getTtdMappingByPerusahaanKode(
+            conn,
+            perusahaanKode,
+        );
+        const ttd = incomingTtd || ttdFallback.ttd;
+        const ttdJabatan = incomingTtdJabatan || ttdFallback.ttd_jabatan;
+
+        const payloadFingerprint = buildCreatePenawaranFingerprint({
+            tanggal,
+            divisi,
+            tipe,
+            perusahaanKode,
+            customerKode,
+            salesKode: finalSales?.sales_kode || salesKode,
+            keterangan,
+            note,
+            details: dedupedDetails,
+        });
+
+        lockState = acquireCreatePenawaranLock({
+            fingerprint: payloadFingerprint,
+            traceId,
+        });
+
+        if (!lockState.acquired) {
+            return res.status(409).json({
+                success: false,
+                message:
+                    "Permintaan create penawaran yang sama sedang diproses",
+                trace_id: traceId,
+            });
+        }
 
         if (!tanggal) {
             return res
@@ -492,20 +888,26 @@ const createPenawaran = async (req, res) => {
                 .status(400)
                 .json({ success: false, message: "Customer wajib diisi" });
         }
-        if (!salesKode) {
-            return res
-                .status(400)
-                .json({ success: false, message: "Sales wajib diisi" });
+        if (!finalSales?.sales_kode) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Sales tidak valid. sales_kode request kosong/tidak valid, dan fallback NIK login (kar_nik -> sal_nik) tidak menemukan sales aktif.",
+                data: {
+                    sales_kode: "",
+                    sales_source: "",
+                },
+            });
         }
-        if (details.length === 0) {
+        if (dedupedDetails.length === 0) {
             return res.status(400).json({
                 success: false,
                 message: "Detail item minimal 1 baris",
             });
         }
 
-        for (let i = 0; i < details.length; i += 1) {
-            const d = details[i] || {};
+        for (let i = 0; i < dedupedDetails.length; i += 1) {
+            const d = dedupedDetails[i] || {};
             const nama = String(d.nama_barang || "").trim();
             const qty = toNumber(d.qty, 0);
             if (!nama) {
@@ -568,15 +970,15 @@ const createPenawaran = async (req, res) => {
                 tipe,
                 perusahaanKode,
                 customerKode,
-                salesKode,
+                finalSales.sales_kode,
                 keterangan,
                 note,
                 "",
                 0,
                 0,
-                "",
-                "",
-                "",
+                ttd,
+                ttdJabatan,
+                up,
                 "",
                 "",
                 1,
@@ -593,8 +995,8 @@ const createPenawaran = async (req, res) => {
             ],
         );
 
-        for (let i = 0; i < details.length; i += 1) {
-            const d = details[i] || {};
+        for (let i = 0; i < dedupedDetails.length; i += 1) {
+            const d = dedupedDetails[i] || {};
             const urutan = i + 1;
             const id = String(d.id || String(urutan).padStart(2, "0")).slice(
                 0,
@@ -643,13 +1045,39 @@ const createPenawaran = async (req, res) => {
             );
         }
 
+        const [countRows] = await conn.query(
+            `
+            SELECT COUNT(*) AS total
+            FROM tpenawaran_dtl
+            WHERE pend_pen_nomor = ?
+            `,
+            [nomor],
+        );
+        const insertedCount = toNumber(countRows?.[0]?.total, 0);
+        if (insertedCount !== dedupedDetails.length) {
+            throw new Error(
+                `Jumlah detail tersimpan tidak konsisten. expected=${dedupedDetails.length}, actual=${insertedCount}`,
+            );
+        }
+
         await conn.commit();
+
+        console.log("[PenawaranCreate][API] committed", {
+            traceId,
+            nomor,
+            insertedCount,
+            sales_kode: finalSales.sales_kode,
+            sales_source: finalSalesSource,
+        });
 
         return res.status(201).json({
             success: true,
             message: "Penawaran berhasil dibuat",
             data: {
                 nomor,
+                sales_kode: finalSales.sales_kode,
+                sales_nama: finalSales.sales_nama,
+                sales_source: finalSalesSource,
             },
         });
     } catch (err) {
@@ -662,6 +1090,9 @@ const createPenawaran = async (req, res) => {
             message: err.sqlMessage || err.message || "Gagal membuat penawaran",
         });
     } finally {
+        if (lockState?.acquired) {
+            releaseCreatePenawaranLock(lockState);
+        }
         if (conn) {
             conn.release();
         }
@@ -708,6 +1139,48 @@ const getMasterPerusahaan = async (req, res) => {
     }
 };
 
+const getMasterCustomer = async (req, res) => {
+    try {
+        const schemaReady = await ensurePenawaranSchema(res);
+        if (!schemaReady) return;
+
+        const search = String(req.query.search || "").trim();
+        const like = `%${search}%`;
+
+        const [rows] = await db.query(
+            `
+            SELECT
+                c.cus_kode AS cc_kode,
+                c.cus_nama AS cc_nama,
+                COALESCE(c.cus_alamat, '') AS cc_alamat,
+                COALESCE(c.cus_cp, '') AS cc_cp,
+                COALESCE(c.cus_telp, '') AS cc_telp,
+                'CUSTOMER' AS sumber
+            FROM tcustomer c
+            WHERE (? = '' OR c.cus_kode LIKE ? OR c.cus_nama LIKE ?)
+            ORDER BY c.cus_nama ASC
+            LIMIT 50
+            `,
+            [search, like, like],
+        );
+
+        return res.json({
+            success: true,
+            data: rows || [],
+        });
+    } catch (err) {
+        console.error("GET MASTER CUSTOMER PENAWARAN ERROR:", err);
+        return res.status(500).json({
+            success: false,
+            data: [],
+            message:
+                err.sqlMessage ||
+                err.message ||
+                "Gagal mengambil data customer penawaran",
+        });
+    }
+};
+
 const getMasterSales = async (req, res) => {
     try {
         const schemaReady = await ensurePenawaranSchema(res);
@@ -719,6 +1192,7 @@ const getMasterSales = async (req, res) => {
         const [rows] = await db.query(
             `
             SELECT
+                s.sal_kode AS id,
                 s.sal_kode AS kode,
                 s.sal_nama AS nama,
                 COALESCE(s.sal_alamat, '') AS alamat
@@ -743,6 +1217,54 @@ const getMasterSales = async (req, res) => {
             success: false,
             message:
                 err.sqlMessage || err.message || "Gagal mengambil data sales",
+        });
+    }
+};
+
+const getMasterPenawaranNomor = async (req, res) => {
+    try {
+        const schemaReady = await ensurePenawaranSchema(res);
+        if (!schemaReady) return;
+
+        const search = String(req.query.search || "").trim();
+        const like = `%${search}%`;
+
+        const [rows] = await db.query(
+            `
+            SELECT
+                h.pen_nomor AS kode,
+                h.pen_nomor AS nama,
+                DATE_FORMAT(h.pen_tanggal, '%Y-%m-%d') AS tanggal,
+                COALESCE(c.cus_nama, '') AS customer,
+                COALESCE(p.perush_nama, '') AS perusahaan
+            FROM tpenawaran_hdr h
+            LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
+            LEFT JOIN tperusahaan p ON p.perush_kode = h.pen_perush_kode
+            WHERE (
+                ? = ''
+                OR h.pen_nomor LIKE ?
+                OR COALESCE(c.cus_nama, '') LIKE ?
+                OR COALESCE(p.perush_nama, '') LIKE ?
+            )
+            ORDER BY h.pen_tanggal DESC, h.pen_nomor DESC
+            LIMIT 30
+            `,
+            [search, like, like, like],
+        );
+
+        return res.json({
+            success: true,
+            data: rows || [],
+        });
+    } catch (err) {
+        console.error("GET MASTER NOMOR PENAWARAN ERROR:", err);
+        return res.status(500).json({
+            success: false,
+            data: [],
+            message:
+                err.sqlMessage ||
+                err.message ||
+                "Gagal mengambil data master nomor penawaran",
         });
     }
 };
@@ -798,8 +1320,26 @@ const updatePenawaranStatusDetail = async (req, res) => {
             });
         }
 
-        const userModified =
-            String(req.body.user || "MOBILE").trim() || "MOBILE";
+        const authUserNama = String(req.user?.nama || "").trim();
+        const bodyUser = String(req.body.user || "").trim();
+        const userModified = authUserNama || bodyUser || "MOBILE";
+        const hasUserModifiedColumn = await hasTableColumn(
+            conn,
+            "tpenawaran_dtl",
+            "user_modified",
+        );
+        const hasDateModifiedColumn = await hasTableColumn(
+            conn,
+            "tpenawaran_dtl",
+            "date_modified",
+        );
+
+        console.log("[PenawaranStatus][SchemaAudit]", {
+            nomor,
+            hasUserModifiedColumn,
+            hasDateModifiedColumn,
+        });
+
         const changes = [];
 
         for (const upd of updates) {
@@ -866,18 +1406,32 @@ const updatePenawaranStatusDetail = async (req, res) => {
                 continue;
             }
 
+            const setClauses = [
+                "pend_status = ?",
+                "pend_batal = ?",
+                "pend_confirm = ?",
+            ];
+            const params = [newStatus, ketBatal, ketConfirm];
+
+            if (hasUserModifiedColumn) {
+                setClauses.push("user_modified = ?");
+                params.push(userModified);
+            }
+
+            if (hasDateModifiedColumn) {
+                setClauses.push("date_modified = NOW()");
+            }
+
+            params.push(id, nomor);
+
             await conn.query(
                 `
                 UPDATE tpenawaran_dtl
                 SET
-                    pend_status = ?,
-                    pend_batal = ?,
-                    pend_confirm = ?,
-                    date_modified = NOW(),
-                    user_modified = ?
+                    ${setClauses.join(",\n                    ")}
                 WHERE pend_id = ? AND pend_pen_nomor = ?
                 `,
-                [newStatus, ketBatal, ketConfirm, userModified, id, nomor],
+                params,
             );
 
             changes.push({
@@ -1055,7 +1609,20 @@ const requestApprovalPerubahan = async (req, res) => {
             });
         }
 
-        const userCreate = String(req.body.user || "MOBILE").trim() || "MOBILE";
+        const authUserNama = String(req.user?.nama || "").trim();
+        const authUserId = String(req.user?.id || "").trim();
+        const bodyUser = String(req.body.user || "").trim();
+        const userCreate = (authUserNama || authUserId || bodyUser || "MOBILE")
+            .trim()
+            .toUpperCase();
+        console.log("[RequestApprovalPerubahan][UserResolution]", {
+            nomor,
+            hasAuthUser: Boolean(authUserNama || authUserId),
+            authUserNama,
+            authUserId,
+            bodyUser,
+            resolvedUserCreate: userCreate,
+        });
         const pinUrut = await getNextPinUrut(conn, "PENAWARAN", nomor);
 
         await conn.query(
@@ -1072,14 +1639,13 @@ const requestApprovalPerubahan = async (req, res) => {
                 pin_acc,
                 pin_dipakai,
                 pin_alasan
-            ) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, '', '', '')
+            ) VALUES (?, ?, ?, ?, CURDATE(), ?, NOW(), ?, '', '', '')
             `,
             [
                 "PENAWARAN",
                 nomor,
                 pinUrut,
                 "MOBILE",
-                new Date(),
                 alasan,
                 String(userCreate).slice(0, 10),
             ],
@@ -1205,7 +1771,9 @@ module.exports = {
     getPenawaranList,
     getPenawaranDetail,
     createPenawaran,
+    getMasterPenawaranNomor,
     getMasterPerusahaan,
+    getMasterCustomer,
     getMasterSales,
     updatePenawaranStatusDetail,
     getMasterPenawaranBatal,
