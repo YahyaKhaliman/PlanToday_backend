@@ -190,6 +190,17 @@ const getPermintaanHargaList = async (req, res) => {
         const offset = (page - 1) * limit;
         const actor = resolveActor(req);
         const actorCandidates = resolveActorCandidates(req);
+        const actorCandidatesNormalized = Array.from(
+            new Set(
+                actorCandidates
+                    .map((v) =>
+                        String(v || "")
+                            .trim()
+                            .toUpperCase(),
+                    )
+                    .filter(Boolean),
+            ),
+        );
         const salesRole = isSalesUser(req);
 
         const where = [
@@ -216,10 +227,18 @@ const getPermintaanHargaList = async (req, res) => {
                 .trim()
                 .toLowerCase() === "1";
 
-        if (salesRole && !bypassSalesFilter) {
-            const placeholders = actorCandidates.map(() => "?").join(",");
-            where.push(`COALESCE(m.user_create,'') IN (${placeholders})`);
-            params.push(...actorCandidates);
+        if (
+            salesRole &&
+            !bypassSalesFilter &&
+            actorCandidatesNormalized.length
+        ) {
+            const placeholders = actorCandidatesNormalized
+                .map(() => "?")
+                .join(",");
+            where.push(
+                `UPPER(TRIM(COALESCE(m.user_create,''))) IN (${placeholders})`,
+            );
+            params.push(...actorCandidatesNormalized);
         }
 
         if (
@@ -230,6 +249,7 @@ const getPermintaanHargaList = async (req, res) => {
             console.log("[PermintaanHarga][List][Debug]", {
                 actor,
                 actorCandidates,
+                actorCandidatesNormalized,
                 salesRole,
                 bypassSalesFilter,
                 startDate,
