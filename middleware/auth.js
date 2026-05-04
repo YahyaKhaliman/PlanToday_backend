@@ -7,12 +7,10 @@ module.exports = async function auth(req, res, next) {
         const header = req.headers.authorization || "";
         const token = header.startsWith("Bearer ") ? header.slice(7) : null;
         if (!token) {
-            return res
-                .status(401)
-                .json({
-                    success: false,
-                    message: "Unauthorized (token missing)",
-                });
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized (token missing)",
+            });
         }
 
         const payload = jwt.verify(token, process.env.JWT_SECRET);
@@ -26,12 +24,10 @@ module.exports = async function auth(req, res, next) {
         );
 
         if (!rows.length) {
-            return res
-                .status(401)
-                .json({
-                    success: false,
-                    message: "Unauthorized (user not found)",
-                });
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized (user not found)",
+            });
         }
 
         const u = rows[0];
@@ -51,6 +47,23 @@ module.exports = async function auth(req, res, next) {
             sales_kode: resolvedSales?.sales_kode || "",
             sales_nama: resolvedSales?.sales_nama || "",
         };
+
+        if (
+            String(process.env.PH_DEBUG_LIST || "")
+                .trim()
+                .toLowerCase() === "1" &&
+            String(req.path || "").includes("/permintaan-harga")
+        ) {
+            console.log("[Auth][PermintaanHarga][User]", {
+                path: req.path,
+                method: req.method,
+                id: req.user.id,
+                nama: req.user.nama,
+                jabatan: req.user.jabatan,
+                sales_kode: req.user.sales_kode,
+                sales_nama: req.user.sales_nama,
+            });
+        }
 
         next();
     } catch (e) {

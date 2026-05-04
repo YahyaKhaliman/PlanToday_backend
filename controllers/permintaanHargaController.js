@@ -222,6 +222,26 @@ const getPermintaanHargaList = async (req, res) => {
             params.push(...actorCandidates);
         }
 
+        if (
+            String(process.env.PH_DEBUG_LIST || "")
+                .trim()
+                .toLowerCase() === "1"
+        ) {
+            console.log("[PermintaanHarga][List][Debug]", {
+                actor,
+                actorCandidates,
+                salesRole,
+                bypassSalesFilter,
+                startDate,
+                endDate,
+                status,
+                search,
+                limit,
+                page,
+                where,
+            });
+        }
+
         params.push(limit, offset);
 
         const [rows] = await db.query(
@@ -246,6 +266,16 @@ const getPermintaanHargaList = async (req, res) => {
             params,
         );
 
+        if (
+            String(process.env.PH_DEBUG_LIST || "")
+                .trim()
+                .toLowerCase() === "1"
+        ) {
+            console.log("[PermintaanHarga][List][Result]", {
+                count: rows?.length || 0,
+            });
+        }
+
         return res.json({
             success: true,
             data: rows,
@@ -256,6 +286,11 @@ const getPermintaanHargaList = async (req, res) => {
             },
         });
     } catch (err) {
+        console.error("[PermintaanHarga][List][Error]", {
+            message: err?.message,
+            sqlMessage: err?.sqlMessage,
+            code: err?.code,
+        });
         return res.status(500).json({
             success: false,
             message:
