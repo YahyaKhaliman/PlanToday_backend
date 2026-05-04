@@ -114,13 +114,14 @@ const normalizePublicOrigin = (origin) => {
 
 const resolveImagePublicOrigin = () => {
     const envOrigin = String(
-        process.env.PUBLIC_IMAGE_ORIGIN ||
+        process.env.PUBLIC_IMAGE_READ_ORIGIN ||
+            process.env.PUBLIC_IMAGE_ORIGIN ||
             process.env.IMAGE_PUBLIC_ORIGIN ||
             "",
     ).trim();
     return (
         normalizePublicOrigin(envOrigin) ||
-        normalizePublicOrigin("http://103.94.238.252:8080")
+        normalizePublicOrigin("http://103.94.238.252:8182")
     );
 };
 
