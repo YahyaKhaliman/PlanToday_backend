@@ -97,13 +97,31 @@ const getNextNomor = async (conn, tahun) => {
 
 const uploadDir = path.join(process.cwd(), "uploads", "mintaharga");
 
+const normalizePublicOrigin = (origin) => {
+    const raw = String(origin || "").trim();
+    if (!raw) return "";
+
+    let normalized = raw.replace(/\\+/g, "/");
+
+    if (normalized.startsWith("//")) {
+        normalized = `http:${normalized}`;
+    } else if (!/^https?:\/\//i.test(normalized)) {
+        normalized = `http://${normalized.replace(/^\/+/, "")}`;
+    }
+
+    return normalized.replace(/\/+$/, "");
+};
+
 const resolveImagePublicOrigin = () => {
     const envOrigin = String(
         process.env.PUBLIC_IMAGE_ORIGIN ||
             process.env.IMAGE_PUBLIC_ORIGIN ||
             "",
     ).trim();
-    return envOrigin || "http://103.94.238.252:8080";
+    return (
+        normalizePublicOrigin(envOrigin) ||
+        normalizePublicOrigin("http://103.94.238.252:8080")
+    );
 };
 
 const buildImageBaseUrl = () => resolveImagePublicOrigin();
