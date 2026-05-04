@@ -97,16 +97,16 @@ const getNextNomor = async (conn, tahun) => {
 
 const uploadDir = path.join(process.cwd(), "uploads", "mintaharga");
 
-const buildBaseUrl = (req) => {
-    const protoHeader = String(req.headers["x-forwarded-proto"] || "")
-        .split(",")
-        .map((v) => v.trim())
-        .filter(Boolean)[0];
-    const protocol = protoHeader || req.protocol || "http";
-    const host = req.get("host");
-    if (!host) return "";
-    return `${protocol}://${host}`;
+const resolveImagePublicOrigin = () => {
+    const envOrigin = String(
+        process.env.PUBLIC_IMAGE_ORIGIN ||
+            process.env.IMAGE_PUBLIC_ORIGIN ||
+            "",
+    ).trim();
+    return envOrigin || "http://103.94.238.252:8080";
 };
+
+const buildImageBaseUrl = () => resolveImagePublicOrigin();
 
 const buildImagePaths = (nomor) => {
     const safeNomor = String(nomor || "").trim();
@@ -341,7 +341,7 @@ const getPermintaanHargaDetail = async (req, res) => {
         }
 
         const row = rows[0];
-        const baseUrl = buildBaseUrl(req);
+        const baseUrl = buildImageBaseUrl();
         const imagePaths = buildImagePaths(row.mh_nomor);
         const withBase = (p) => (baseUrl ? `${baseUrl}${p}` : p);
 
@@ -722,7 +722,7 @@ const uploadPermintaanHargaImage = async (req, res) => {
             });
         }
 
-        const baseUrl = buildBaseUrl(req);
+        const baseUrl = buildImageBaseUrl();
         const imagePaths = buildImagePaths(nomor);
         const currentPath =
             String(slot) === "2" ? imagePaths.delphi2 : imagePaths.delphi1;
