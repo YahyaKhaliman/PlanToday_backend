@@ -227,19 +227,7 @@ const getPermintaanHargaList = async (req, res) => {
                 .trim()
                 .toLowerCase() === "1";
 
-        if (
-            salesRole &&
-            !bypassSalesFilter &&
-            actorCandidatesNormalized.length
-        ) {
-            const placeholders = actorCandidatesNormalized
-                .map(() => "?")
-                .join(",");
-            where.push(
-                `UPPER(TRIM(COALESCE(m.user_create,''))) IN (${placeholders})`,
-            );
-            params.push(...actorCandidatesNormalized);
-        }
+        // TEMP: bypass user_create filter
 
         if (
             String(process.env.PH_DEBUG_LIST || "")
