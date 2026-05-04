@@ -8,6 +8,10 @@ const requestLogger = require(path.join(__dirname, "middleware", "log"));
 const app = express();
 
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use(
+    "/image/mintaharga",
+    express.static(path.join(process.cwd(), "image", "mintaharga")),
+);
 
 app.use(cors());
 app.use(express.json());
@@ -28,6 +32,7 @@ app.use("/api", require("./routes/authRoute"));
 app.use("/api", require("./routes/homeRoute"));
 app.use("/api", require("./routes/kurirRoute"));
 app.use("/api", require("./routes/penawaranRoute"));
+app.use("/api", require("./routes/permintaanHargaRoute"));
 
 app.listen(process.env.PORT, "0.0.0.0", () => {
     console.log(`Server PlanToday running in: ${process.env.PORT}`);

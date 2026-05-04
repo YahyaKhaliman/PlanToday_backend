@@ -875,6 +875,7 @@ const rekapVisitWA = async (req, res) => {
         INNER JOIN tkaryawan ka ON ka.kar_nama = ku.user
         INNER JOIN tcaloncustomer ca ON ca.cc_kode = ku.cus_kode
         WHERE ku.user = ?
+            AND ku.realisasi = 'Y'
             AND DATE(ku.tanggal) >= ?
             AND DATE(ku.tanggal) <= ?
         `;
@@ -1077,9 +1078,9 @@ const rekapVisitPlanWA = async (req, res) => {
         k.id,
         DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
         k.cus_kode,
-        c.cc_nama,
-        c.cc_alamat,
-        c.cc_kota,
+        COALESCE(c.cc_nama, cus.cus_nama) AS cc_nama,
+        COALESCE(c.cc_alamat, cus.cus_alamat) AS cc_alamat,
+        COALESCE(c.cc_kota, cus.cus_kota) AS cc_kota,
         k.note,
         k.catatan,
         k.realisasi,
@@ -1100,7 +1101,8 @@ const rekapVisitPlanWA = async (req, res) => {
             AND DATE(t.tanggal_plan) <= ?
         GROUP BY t.user, DATE(t.tanggal_plan), t.cus_kode
         ) p ON p.pick_id = k.id
-        INNER JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
+        LEFT JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
+        LEFT JOIN tcustomer cus ON cus.cus_kode = k.cus_kode
         LEFT JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
     `;
