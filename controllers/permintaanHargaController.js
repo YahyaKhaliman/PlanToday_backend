@@ -129,10 +129,10 @@ const buildImageBaseUrl = () => resolveImagePublicOrigin();
 const buildImagePaths = (nomor) => {
     const safeNomor = String(nomor || "").trim();
     return {
-        delphi1: `/image/mintaharga/${safeNomor}.jpg`,
-        delphi2: `/image/mintaharga/${safeNomor}-2.jpg`,
-        legacy1: `/uploads/mintaharga/${safeNomor}.jpg`,
-        legacy2: `/uploads/mintaharga/${safeNomor}-2.jpg`,
+        delphi1: `/images/img/mintaharga/${safeNomor}.jpg`,
+        delphi2: `/images/img/mintaharga/${safeNomor}-2.jpg`,
+        legacy1: `/images/img/mintaharga/${safeNomor}.jpg`,
+        legacy2: `/images/img/mintaharga/${safeNomor}-2.jpg`,
     };
 };
 
