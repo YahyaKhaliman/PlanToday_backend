@@ -340,7 +340,24 @@ const getPermintaanHargaDetail = async (req, res) => {
         const [rows] = await db.query(
             `
             SELECT
-                h.*,
+                h.mh_nomor,
+                h.mh_divisi,
+                h.mh_tanggal,
+                h.mh_cus_kode,
+                h.mh_cus_nama,
+                h.mh_sal_kode,
+                h.mh_nama,
+                h.mh_jmlorder,
+                h.mh_dateorder,
+                h.mh_kain,
+                h.mh_panjang,
+                h.mh_lebar,
+                h.mh_ukuran,
+                h.mh_gramasi,
+                h.mh_finishing,
+                h.mh_ket,
+                h.mh_status,
+                h.user_create,
                 COALESCE(v.divisi,'') AS divisi_nama,
                 COALESCE(s.sal_nama,'') AS sales_nama,
                 DATE_FORMAT(h.date_create, '%Y-%m-%d %H:%i:%s') AS created_at_fmt

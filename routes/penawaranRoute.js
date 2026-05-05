@@ -25,6 +25,11 @@ router.get(
     penawaranController.getMasterPenawaranNomor,
 );
 router.get(
+    "/penawaran/master/permintaan-harga",
+    auth,
+    penawaranController.getMasterPermintaanHargaForPenawaran,
+);
+router.get(
     "/penawaran/master/perusahaan",
     penawaranController.getMasterPerusahaan,
 );

@@ -1269,6 +1269,169 @@ const getMasterPenawaranNomor = async (req, res) => {
     }
 };
 
+const getMasterPermintaanHargaForPenawaran = async (req, res) => {
+    try {
+        const schemaReady = await ensurePenawaranSchema(res);
+        if (!schemaReady) return;
+
+        const search = String(req.query.search || "").trim();
+        const selectedNomor = String(req.query.nomor || "").trim();
+        const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
+        const page = Math.max(Number(req.query.page) || 1, 1);
+        const offset = (page - 1) * limit;
+
+        const authSalesKode = String(req.user?.sales_kode || "").trim();
+        const isManager =
+            String(req.user?.jabatan || "")
+                .trim()
+                .toUpperCase() === "MANAGER";
+        const requestedSalesKode = String(req.query.sales_kode || "").trim();
+        const effectiveSalesKode = isManager
+            ? requestedSalesKode || authSalesKode
+            : authSalesKode;
+
+        if (!effectiveSalesKode) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Sales tidak valid untuk pencarian permintaan harga (sales_kode kosong)",
+            });
+        }
+
+        const params = [effectiveSalesKode];
+        let searchSql = "";
+        if (search) {
+            const like = `%${search}%`;
+            searchSql = `
+                AND (
+                    m.mh_nomor LIKE ?
+                    OR COALESCE(m.mh_nama, '') LIKE ?
+                    OR COALESCE(m.mh_kain, '') LIKE ?
+                    OR COALESCE(m.mh_ukuran, '') LIKE ?
+                    OR COALESCE(m.mh_cus_nama, '') LIKE ?
+                )
+            `;
+            params.push(like, like, like, like, like);
+        }
+
+        params.push(limit, offset);
+
+        const [rows] = await db.query(
+            `
+            SELECT
+                COALESCE(m.mh_nomor, '') AS nomor,
+                DATE_FORMAT(m.mh_tanggal, '%Y-%m-%d') AS tanggal,
+                COALESCE(m.mh_status, '') AS status,
+                COALESCE(m.mh_sal_kode, '') AS sales_kode,
+                COALESCE(s.sal_nama, '') AS sales,
+                COALESCE(m.mh_cus_kode, '') AS customer_kode,
+                COALESCE(m.mh_cus_nama, '') AS customer,
+                COALESCE(m.mh_nama, '') AS nama_barang,
+                COALESCE(m.mh_kain, '') AS bahan,
+                COALESCE(m.mh_ukuran, '') AS ukuran,
+                COALESCE(m.mh_panjang, 0) AS panjang,
+                COALESCE(m.mh_lebar, 0) AS lebar,
+                COALESCE(m.mh_jmlorder, 0) AS qty,
+                COALESCE(NULLIF(m.mh_harga_kalkulasi, 0), m.mh_harga, 0) AS harga_referensi,
+                IF(COALESCE(m.mh_status, '') <> 'BELUM', 1, 0) AS is_non_belum
+            FROM tmintaharga m
+            LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
+            WHERE COALESCE(m.mh_sal_kode, '') = ?
+            ${searchSql}
+            ORDER BY m.mh_tanggal DESC, m.mh_nomor DESC
+            LIMIT ? OFFSET ?
+            `,
+            params,
+        );
+
+        let selected = null;
+        if (selectedNomor) {
+            const [detailRows] = await db.query(
+                `
+                SELECT
+                    COALESCE(m.mh_nomor, '') AS nomor,
+                    DATE_FORMAT(m.mh_tanggal, '%Y-%m-%d') AS tanggal,
+                    COALESCE(m.mh_status, '') AS status,
+                    COALESCE(m.mh_sal_kode, '') AS sales_kode,
+                    COALESCE(s.sal_nama, '') AS sales,
+                    COALESCE(m.mh_cus_kode, '') AS customer_kode,
+                    COALESCE(m.mh_cus_nama, '') AS customer,
+                    COALESCE(m.mh_nama, '') AS nama_barang,
+                    COALESCE(m.mh_kain, '') AS bahan,
+                    COALESCE(m.mh_ukuran, '') AS ukuran,
+                    COALESCE(m.mh_panjang, 0) AS panjang,
+                    COALESCE(m.mh_lebar, 0) AS lebar,
+                    COALESCE(m.mh_jmlorder, 0) AS qty,
+                    COALESCE(NULLIF(m.mh_harga_kalkulasi, 0), m.mh_harga, 0) AS harga_referensi,
+                    COALESCE(m.mh_ket, '') AS keterangan,
+                    IF(COALESCE(m.mh_status, '') <> 'BELUM', 1, 0) AS is_non_belum
+                FROM tmintaharga m
+                LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
+                WHERE m.mh_nomor = ?
+                  AND COALESCE(m.mh_sal_kode, '') = ?
+                LIMIT 1
+                `,
+                [selectedNomor, effectiveSalesKode],
+            );
+
+            if (detailRows?.length) {
+                const d = detailRows[0];
+                selected = {
+                    nomor: d.nomor,
+                    tanggal: d.tanggal,
+                    status: d.status,
+                    sales_kode: d.sales_kode,
+                    sales: d.sales,
+                    customer_kode: d.customer_kode,
+                    customer: d.customer,
+                    autofill: {
+                        no_permintaan: d.nomor,
+                        nama_barang: d.nama_barang,
+                        bahan: d.bahan,
+                        ukuran: d.ukuran,
+                        panjang: toNumber(d.panjang, 0),
+                        lebar: toNumber(d.lebar, 0),
+                        qty: toNumber(d.qty, 0),
+                        harga_referensi: toNumber(d.harga_referensi, 0),
+                        keterangan: d.keterangan,
+                    },
+                    warning:
+                        Number(d.is_non_belum) === 1
+                            ? "Status permintaan bukan BELUM"
+                            : "",
+                };
+            }
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                options: rows || [],
+                selected,
+            },
+            meta: {
+                page,
+                limit,
+                count: rows?.length || 0,
+                sales_kode: effectiveSalesKode,
+                sales_source:
+                    isManager && requestedSalesKode
+                        ? "HEADER_SALES"
+                        : "AUTH_LOGIN",
+            },
+        });
+    } catch (err) {
+        console.error("GET MASTER PERMINTAAN HARGA PENAWARAN ERROR:", err);
+        return res.status(500).json({
+            success: false,
+            message:
+                err.sqlMessage ||
+                err.message ||
+                "Gagal mengambil data permintaan harga untuk penawaran",
+        });
+    }
+};
+
 const updatePenawaranStatusDetail = async (req, res) => {
     let conn;
 
@@ -1772,6 +1935,7 @@ module.exports = {
     getPenawaranDetail,
     createPenawaran,
     getMasterPenawaranNomor,
+    getMasterPermintaanHargaForPenawaran,
     getMasterPerusahaan,
     getMasterCustomer,
     getMasterSales,
