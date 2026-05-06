@@ -248,6 +248,40 @@ const extractPermintaanNomorFromDetails = (details) => {
     return list;
 };
 
+const getPermintaanCustomerMap = async (
+    conn,
+    nomorList,
+    { forUpdate = false } = {},
+) => {
+    if (!Array.isArray(nomorList) || nomorList.length === 0) {
+        return new Map();
+    }
+
+    const placeholders = buildInPlaceholders(nomorList);
+    const lockSql = forUpdate ? " FOR UPDATE" : "";
+    const [rows] = await conn.query(
+        `
+        SELECT
+            COALESCE(m.mh_nomor, '') AS nomor,
+            COALESCE(m.mh_cus_kode, '') AS customer_kode,
+            COALESCE(m.mh_cus_nama, '') AS customer
+        FROM tmintaharga m
+        WHERE COALESCE(m.mh_nomor, '') IN (${placeholders})${lockSql}
+        `,
+        nomorList,
+    );
+
+    const customerMap = new Map();
+    for (const row of rows || []) {
+        const nomor = normalizePermintaanNomor(row?.nomor);
+        customerMap.set(nomor, {
+            customer_kode: String(row?.customer_kode || "").trim(),
+            customer: String(row?.customer || "").trim(),
+        });
+    }
+    return customerMap;
+};
+
 const buildInPlaceholders = (values) =>
     (Array.isArray(values) ? values : []).map(() => "?").join(", ");
 
@@ -1030,6 +1064,11 @@ const createPenawaran = async (req, res) => {
                 requestedPermintaanNomor,
                 { forUpdate: true },
             );
+            const permintaanCustomerMap = await getPermintaanCustomerMap(
+                conn,
+                requestedPermintaanNomor,
+                { forUpdate: true },
+            );
 
             const conflictNomor = [];
             for (const nomorPermintaan of requestedPermintaanNomor) {
@@ -1055,6 +1094,32 @@ const createPenawaran = async (req, res) => {
                     message:
                         "Sebagian No. Permintaan sudah tidak valid (harus SELESAI/DONE dan belum terpakai)",
                     conflict_nomor_permintaan: conflictNomor,
+                });
+            }
+
+            const mismatchNomor = [];
+            for (const nomorPermintaan of requestedPermintaanNomor) {
+                const permintaanCustomer =
+                    permintaanCustomerMap.get(nomorPermintaan);
+                const permintaanCustomerKode = String(
+                    permintaanCustomer?.customer_kode || "",
+                ).trim();
+                if (!permintaanCustomerKode) {
+                    mismatchNomor.push(nomorPermintaan);
+                    continue;
+                }
+                if (permintaanCustomerKode !== customerKode) {
+                    mismatchNomor.push(nomorPermintaan);
+                }
+            }
+
+            if (mismatchNomor.length > 0) {
+                await conn.rollback();
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "Customer detail No. Permintaan tidak konsisten dengan customer header transaksi",
+                    mismatch_nomor_permintaan: mismatchNomor,
                 });
             }
         }
@@ -1428,6 +1493,9 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
                 .trim()
                 .toUpperCase() === "MANAGER";
         const requestedSalesKode = String(req.query.sales_kode || "").trim();
+        const referenceCustomerKode = String(
+            req.query.customer_kode || "",
+        ).trim();
         const effectiveSalesKode = isManager
             ? requestedSalesKode || authSalesKode
             : authSalesKode;
@@ -1444,6 +1512,12 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
             effectiveSalesKode,
             ...PERMINTAAN_STATUS_SELESAI_VALUES,
         ];
+        let customerSql = "";
+        if (referenceCustomerKode) {
+            customerSql =
+                "\n                  AND COALESCE(m.mh_cus_kode, '') = ?";
+            params.push(referenceCustomerKode);
+        }
         let searchSql = "";
         if (search) {
             const like = `%${search}%`;
@@ -1483,6 +1557,7 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
                 LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
                 WHERE COALESCE(m.mh_sal_kode, '') = ?
                   AND UPPER(TRIM(COALESCE(m.mh_status, ''))) IN (?, ?)
+                  ${customerSql}
                   AND NOT EXISTS (
                       SELECT 1
                       FROM tpenawaran_dtl d
@@ -1527,6 +1602,17 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
 
             if (detailRows?.length) {
                 const d = detailRows[0];
+                if (
+                    referenceCustomerKode &&
+                    String(d.customer_kode || "").trim() !==
+                        referenceCustomerKode
+                ) {
+                    return res.status(409).json({
+                        success: false,
+                        message:
+                            "Customer pada No. Permintaan tidak sama dengan customer acuan transaksi",
+                    });
+                }
                 if (!isPermintaanStatusSelesai(d.status)) {
                     return res.status(409).json({
                         success: false,
@@ -1594,6 +1680,7 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
                 limit,
                 count: rows?.length || 0,
                 sales_kode: effectiveSalesKode,
+                customer_kode: referenceCustomerKode,
                 sales_source:
                     isManager && requestedSalesKode
                         ? "HEADER_SALES"
