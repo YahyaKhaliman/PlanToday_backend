@@ -9,6 +9,22 @@ const toNumber = (value, fallback = 0) => {
     return Number.isFinite(num) ? num : fallback;
 };
 
+const toDecimalNumber = (value, fallback = 0) => {
+    const normalized = String(value ?? "")
+        .trim()
+        .replace(/,/g, ".")
+        .replace(/[^0-9.]/g, "");
+    if (!normalized) return fallback;
+    const firstDot = normalized.indexOf(".");
+    const safe =
+        firstDot === -1
+            ? normalized
+            : normalized.slice(0, firstDot + 1) +
+              normalized.slice(firstDot + 1).replace(/\./g, "");
+    const num = Number(safe);
+    return Number.isFinite(num) ? num : fallback;
+};
+
 const normalizeDate = (value) => {
     if (!value) return null;
     const s = String(value).trim().slice(0, 10);
@@ -36,7 +52,7 @@ const isSalesUser = (req) =>
 
 const resolveActor = (req) =>
     String(
-        req.user?.id || req.user?.nama || req.body?.user || "MOBILE",
+        req.user?.nama || req.user?.id || req.body?.user || "MOBILE",
     ).trim() || "MOBILE";
 
 const resolveActorCandidates = (req) => {
@@ -443,6 +459,16 @@ const getPermintaanHargaDetail = async (req, res) => {
 const createPermintaanHarga = async (req, res) => {
     try {
         const body = req.body || {};
+        console.log("[PermintaanHarga][Create][PriceInput]", {
+            mh_harga_raw: body.mh_harga,
+            mh_budget_raw: body.mh_budget,
+            mh_harga_normalized: toNumber(body.mh_harga, 0),
+            mh_budget_normalized: toNumber(body.mh_budget, 0),
+            mh_panjang_raw: body.mh_panjang,
+            mh_lebar_raw: body.mh_lebar,
+            mh_panjang_normalized: toDecimalNumber(body.mh_panjang, 0),
+            mh_lebar_normalized: toDecimalNumber(body.mh_lebar, 0),
+        });
         const tanggal = normalizeDate(
             body.mh_tanggal || new Date().toISOString(),
         );
@@ -507,6 +533,17 @@ const updatePermintaanHarga = async (req, res) => {
         const nomor = String(req.params.nomor || "").trim();
         const actor = resolveActor(req);
         const body = req.body || {};
+        console.log("[PermintaanHarga][Update][PriceInput]", {
+            nomor,
+            mh_harga_raw: body.mh_harga,
+            mh_budget_raw: body.mh_budget,
+            mh_harga_normalized: toNumber(body.mh_harga, 0),
+            mh_budget_normalized: toNumber(body.mh_budget, 0),
+            mh_panjang_raw: body.mh_panjang,
+            mh_lebar_raw: body.mh_lebar,
+            mh_panjang_normalized: toDecimalNumber(body.mh_panjang, 0),
+            mh_lebar_normalized: toDecimalNumber(body.mh_lebar, 0),
+        });
 
         const [rows] = await db.query(
             `SELECT mh_nomor, mh_status, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
@@ -572,8 +609,8 @@ const updatePermintaanHarga = async (req, res) => {
                 toNumber(body.mh_budget, 0),
                 normalizeDate(body.mh_dateorder),
                 String(body.mh_kain || "").trim(),
-                toNumber(body.mh_panjang, 0),
-                toNumber(body.mh_lebar, 0),
+                toDecimalNumber(body.mh_panjang, 0),
+                toDecimalNumber(body.mh_lebar, 0),
                 String(body.mh_ukuran || "").trim(),
                 String(body.mh_gramasi || "").trim(),
                 String(body.mh_finishing || "").trim(),
