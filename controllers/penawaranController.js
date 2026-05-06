@@ -222,6 +222,96 @@ const normalizeApprovalState = (value) =>
         .trim()
         .toUpperCase();
 
+const normalizePermintaanStatus = (value) =>
+    String(value || "")
+        .trim()
+        .toUpperCase();
+
+const PERMINTAAN_STATUS_SELESAI_VALUES = ["SELESAI", "DONE"];
+
+const isPermintaanStatusSelesai = (value) =>
+    PERMINTAAN_STATUS_SELESAI_VALUES.includes(normalizePermintaanStatus(value));
+
+const normalizePermintaanNomor = (value) => String(value || "").trim();
+
+const extractPermintaanNomorFromDetails = (details) => {
+    const list = [];
+    const seen = new Set();
+
+    for (const detail of Array.isArray(details) ? details : []) {
+        const nomor = normalizePermintaanNomor(detail?.minta);
+        if (!nomor || seen.has(nomor)) continue;
+        seen.add(nomor);
+        list.push(nomor);
+    }
+
+    return list;
+};
+
+const buildInPlaceholders = (values) =>
+    (Array.isArray(values) ? values : []).map(() => "?").join(", ");
+
+const getPermintaanUsageMap = async (
+    conn,
+    nomorList,
+    { forUpdate = false } = {},
+) => {
+    if (!Array.isArray(nomorList) || nomorList.length === 0) {
+        return new Map();
+    }
+
+    const placeholders = buildInPlaceholders(nomorList);
+    const lockSql = forUpdate ? " FOR UPDATE" : "";
+    const [rows] = await conn.query(
+        `
+        SELECT
+            COALESCE(d.pend_minta, '') AS nomor,
+            COUNT(*) AS used_count
+        FROM tpenawaran_dtl d
+        WHERE COALESCE(d.pend_minta, '') IN (${placeholders})
+        GROUP BY d.pend_minta${lockSql}
+        `,
+        nomorList,
+    );
+
+    const usageMap = new Map();
+    for (const row of rows || []) {
+        const nomor = normalizePermintaanNomor(row?.nomor);
+        usageMap.set(nomor, toNumber(row?.used_count, 0));
+    }
+    return usageMap;
+};
+
+const getPermintaanStatusMap = async (
+    conn,
+    nomorList,
+    { forUpdate = false } = {},
+) => {
+    if (!Array.isArray(nomorList) || nomorList.length === 0) {
+        return new Map();
+    }
+
+    const placeholders = buildInPlaceholders(nomorList);
+    const lockSql = forUpdate ? " FOR UPDATE" : "";
+    const [rows] = await conn.query(
+        `
+        SELECT
+            COALESCE(m.mh_nomor, '') AS nomor,
+            COALESCE(m.mh_status, '') AS status
+        FROM tmintaharga m
+        WHERE COALESCE(m.mh_nomor, '') IN (${placeholders})${lockSql}
+        `,
+        nomorList,
+    );
+
+    const statusMap = new Map();
+    for (const row of rows || []) {
+        const nomor = normalizePermintaanNomor(row?.nomor);
+        statusMap.set(nomor, String(row?.status || ""));
+    }
+    return statusMap;
+};
+
 const getLatestApprovalState = async (conn, nomor) => {
     const [rows] = await conn.query(
         `
@@ -926,6 +1016,49 @@ const createPenawaran = async (req, res) => {
 
         await conn.beginTransaction();
 
+        const requestedPermintaanNomor =
+            extractPermintaanNomorFromDetails(dedupedDetails);
+
+        if (requestedPermintaanNomor.length > 0) {
+            const permintaanStatusMap = await getPermintaanStatusMap(
+                conn,
+                requestedPermintaanNomor,
+                { forUpdate: true },
+            );
+            const permintaanUsageMap = await getPermintaanUsageMap(
+                conn,
+                requestedPermintaanNomor,
+                { forUpdate: true },
+            );
+
+            const conflictNomor = [];
+            for (const nomorPermintaan of requestedPermintaanNomor) {
+                const status = permintaanStatusMap.get(nomorPermintaan);
+                const usedCount = toNumber(
+                    permintaanUsageMap.get(nomorPermintaan),
+                    0,
+                );
+
+                if (
+                    !status ||
+                    !isPermintaanStatusSelesai(status) ||
+                    usedCount > 0
+                ) {
+                    conflictNomor.push(nomorPermintaan);
+                }
+            }
+
+            if (conflictNomor.length > 0) {
+                await conn.rollback();
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "Sebagian No. Permintaan sudah tidak valid (harus SELESAI/DONE dan belum terpakai)",
+                    conflict_nomor_permintaan: conflictNomor,
+                });
+            }
+        }
+
         const tahun = Number(String(tanggal).slice(0, 4));
         const nomor = await getNextPenawaranNumber(conn, perusahaanKode, tahun);
 
@@ -1085,6 +1218,15 @@ const createPenawaran = async (req, res) => {
             await conn.rollback();
         }
         console.error("CREATE PENAWARAN ERROR:", err);
+
+        if (err?.code === "ER_DUP_ENTRY") {
+            return res.status(409).json({
+                success: false,
+                message:
+                    "No. Permintaan conflict (sudah terpakai oleh transaksi lain). Silakan refresh data dan pilih nomor lain.",
+            });
+        }
+
         return res.status(500).json({
             success: false,
             message: err.sqlMessage || err.message || "Gagal membuat penawaran",
@@ -1298,7 +1440,10 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
             });
         }
 
-        const params = [effectiveSalesKode];
+        const params = [
+            effectiveSalesKode,
+            ...PERMINTAAN_STATUS_SELESAI_VALUES,
+        ];
         let searchSql = "";
         if (search) {
             const like = `%${search}%`;
@@ -1331,15 +1476,21 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
                 COALESCE(m.mh_ukuran, '') AS ukuran,
                 COALESCE(m.mh_panjang, 0) AS panjang,
                 COALESCE(m.mh_lebar, 0) AS lebar,
-                COALESCE(m.mh_jmlorder, 0) AS qty,
-                COALESCE(NULLIF(m.mh_harga_kalkulasi, 0), m.mh_harga, 0) AS harga_referensi,
-                IF(COALESCE(m.mh_status, '') <> 'BELUM', 1, 0) AS is_non_belum
-            FROM tmintaharga m
-            LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
-            WHERE COALESCE(m.mh_sal_kode, '') = ?
-            ${searchSql}
-            ORDER BY m.mh_tanggal DESC, m.mh_nomor DESC
-            LIMIT ? OFFSET ?
+                    COALESCE(m.mh_jmlorder, 0) AS qty,
+                    COALESCE(NULLIF(m.mh_harga_kalkulasi, 0), m.mh_harga, 0) AS harga_referensi,
+                    IF(UPPER(TRIM(COALESCE(m.mh_status, ''))) IN ('SELESAI', 'DONE'), 1, 0) AS is_non_belum
+                FROM tmintaharga m
+                LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
+                WHERE COALESCE(m.mh_sal_kode, '') = ?
+                  AND UPPER(TRIM(COALESCE(m.mh_status, ''))) IN (?, ?)
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM tpenawaran_dtl d
+                      WHERE COALESCE(d.pend_minta, '') = COALESCE(m.mh_nomor, '')
+                  )
+                ${searchSql}
+                ORDER BY m.mh_tanggal DESC, m.mh_nomor DESC
+                LIMIT ? OFFSET ?
             `,
             params,
         );
@@ -1364,7 +1515,7 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
                     COALESCE(m.mh_jmlorder, 0) AS qty,
                     COALESCE(NULLIF(m.mh_harga_kalkulasi, 0), m.mh_harga, 0) AS harga_referensi,
                     COALESCE(m.mh_ket, '') AS keterangan,
-                    IF(COALESCE(m.mh_status, '') <> 'BELUM', 1, 0) AS is_non_belum
+                    IF(UPPER(TRIM(COALESCE(m.mh_status, ''))) IN ('SELESAI', 'DONE'), 1, 0) AS is_non_belum
                 FROM tmintaharga m
                 LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
                 WHERE m.mh_nomor = ?
@@ -1376,6 +1527,34 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
 
             if (detailRows?.length) {
                 const d = detailRows[0];
+                if (!isPermintaanStatusSelesai(d.status)) {
+                    return res.status(409).json({
+                        success: false,
+                        message:
+                            "No. Permintaan belum selesai (hanya status SELESAI/DONE yang diizinkan)",
+                    });
+                }
+
+                const [usageRows] = await db.query(
+                    `
+                    SELECT COUNT(*) AS used_count
+                    FROM tpenawaran_dtl
+                    WHERE COALESCE(pend_minta, '') = ?
+                    `,
+                    [normalizePermintaanNomor(d.nomor)],
+                );
+                const isAlreadyUsed =
+                    toNumber(usageRows?.[0]?.used_count, 0) > 0;
+                if (isAlreadyUsed) {
+                    return res.status(409).json({
+                        success: false,
+                        message:
+                            "No. Permintaan sudah terpakai pada penawaran lain dan tidak bisa dipilih",
+                    });
+                }
+
+                const normalizedStatus = normalizePermintaanStatus(d.status);
+
                 selected = {
                     nomor: d.nomor,
                     tanggal: d.tanggal,
@@ -1396,9 +1575,10 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
                         keterangan: d.keterangan,
                     },
                     warning:
-                        Number(d.is_non_belum) === 1
-                            ? "Status permintaan bukan BELUM"
+                        normalizedStatus !== "BELUM"
+                            ? `Status permintaan: ${normalizedStatus || "-"}`
                             : "",
+                    info: "Form Terisi otomatis",
                 };
             }
         }

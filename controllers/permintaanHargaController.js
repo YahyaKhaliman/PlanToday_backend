@@ -130,15 +130,48 @@ const buildImageBaseUrl = () => resolveImagePublicOrigin();
 const buildImagePaths = (nomor) => {
     const safeNomor = String(nomor || "").trim();
     return {
-        delphi1: `/images/mintaharga/${safeNomor}.jpg`,
-        delphi2: `/images/mintaharga/${safeNomor}-2.jpg`,
-        legacy1: `/images/mintaharga/${safeNomor}.jpg`,
-        legacy2: `/images/mintaharga/${safeNomor}-2.jpg`,
+        delphi1: `/image/mintaharga/${safeNomor}.jpg`,
+        delphi2: `/image/mintaharga/${safeNomor}-2.jpg`,
+        legacy1: `/image/mintaharga/${safeNomor}.jpg`,
+        legacy2: `/image/mintaharga/${safeNomor}-2.jpg`,
     };
 };
 
 const getYearFromTanggal = (tanggal) =>
     Number(String(tanggal || "").slice(0, 4));
+
+const isBasicEmail = (value) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+
+const isBasicNpwp = (value) => {
+    const digits = String(value || "").replace(/\D/g, "");
+    return digits.length >= 15;
+};
+
+const getNextCustomerKode = async (conn) => {
+    const baseSql = `
+        SELECT IFNULL(MAX(CAST(cus_kode AS UNSIGNED)), 0) AS max_kode
+        FROM tcustomer
+        WHERE TRIM(IFNULL(cus_kode, '')) REGEXP '^[0-9]{1,5}$'
+    `;
+
+    try {
+        const [rows] = await conn.query(
+            `${baseSql}
+             AND (
+                 IFNULL(TRIM(cus_kodec), '') = ''
+                 OR TRIM(cus_kodec) = '0'
+             )`,
+        );
+        const next = toNumber(rows?.[0]?.max_kode, 0) + 1;
+        return String(next).padStart(5, "0");
+    } catch (err) {
+        if (String(err?.code || "") !== "ER_BAD_FIELD_ERROR") throw err;
+        const [fallbackRows] = await conn.query(baseSql);
+        const next = toNumber(fallbackRows?.[0]?.max_kode, 0) + 1;
+        return String(next).padStart(5, "0");
+    }
+};
 
 const createPermintaanHargaInTransaction = async ({
     conn,
@@ -380,6 +413,13 @@ const getPermintaanHargaDetail = async (req, res) => {
         const baseUrl = buildImageBaseUrl();
         const imagePaths = buildImagePaths(row.mh_nomor);
         const withBase = (p) => (baseUrl ? `${baseUrl}${p}` : p);
+
+        console.log("[PermintaanHarga][Detail][ImageUrl]", {
+            nomor: row.mh_nomor,
+            baseUrl,
+            imagePath1: imagePaths.delphi1,
+            imagePath2: imagePaths.delphi2,
+        });
 
         row.gambar_1_url = withBase(imagePaths.delphi1);
         row.gambar_2_url = withBase(imagePaths.delphi2);
@@ -766,6 +806,17 @@ const uploadPermintaanHargaImage = async (req, res) => {
             String(slot) === "2" ? imagePaths.legacy2 : imagePaths.legacy1;
         const withBase = (p) => (baseUrl ? `${baseUrl}${p}` : p);
 
+        console.log("[PermintaanHarga][Upload][Result]", {
+            nomor,
+            slot,
+            savedFile: req.file?.filename,
+            mimeType: req.file?.mimetype,
+            size: req.file?.size,
+            baseUrl,
+            currentPath,
+            legacyPath,
+        });
+
         return res.json({
             success: true,
             message: "Upload gambar berhasil",
@@ -785,11 +836,167 @@ const uploadPermintaanHargaImage = async (req, res) => {
     }
 };
 
+const createPermintaanHargaCustomer = async (req, res) => {
+    let conn;
+    try {
+        const body = req.body || {};
+        const actor =
+            String(body.user_create || "").trim() ||
+            String(req.user?.nama || "").trim() ||
+            resolveActor(req);
+
+        const nama = String(body.nama || "").trim();
+        const alamat = String(body.alamat || "").trim();
+        const kota = String(body.kota || "").trim();
+        const telp = String(body.cus_telp || body.telp || "").trim();
+        const cp = String(body.cus_cp || body.kontak_person || "").trim();
+        const email = String(body.cus_email || body.email || "").trim();
+        const korporasi =
+            String(body.cus_korporasi || body.korporasi || "N")
+                .trim()
+                .toUpperCase() === "Y"
+                ? "Y"
+                : "N";
+
+        const jenisUsaha = String(
+            body.cus_jenisusaha || body.jenis_usaha || "",
+        ).trim();
+        const npwp = String(body.cus_npwp || body.npwp || "").trim();
+        const namaNpwp = String(
+            body.cus_nama_npwp || body.nama_npwp || "",
+        ).trim();
+        const alamatNpwp = String(
+            body.cus_alamat_npwp || body.alamat_npwp || "",
+        ).trim();
+        const kotaNpwp = String(
+            body.cus_kota_npwp || body.kota_npwp || "",
+        ).trim();
+
+        if (!nama || !alamat || !kota || !telp || !cp || !email) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Nama, alamat, kota, no telp, kontak person, dan email wajib diisi",
+            });
+        }
+
+        if (!isBasicEmail(email)) {
+            return res.status(400).json({
+                success: false,
+                message: "Format email tidak valid",
+            });
+        }
+
+        if (korporasi === "Y") {
+            if (!jenisUsaha || !npwp) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Jenis usaha dan NPWP wajib diisi untuk korporasi",
+                });
+            }
+            if (!isBasicNpwp(npwp)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Format NPWP tidak valid",
+                });
+            }
+        }
+
+        const kode = await withNomorLock("customer:create", async () => {
+            conn = await db.getConnection();
+            try {
+                for (let attempt = 1; attempt <= 3; attempt += 1) {
+                    await conn.beginTransaction();
+                    const candidate = await getNextCustomerKode(conn);
+                    const [exists] = await conn.query(
+                        `SELECT cus_kode FROM tcustomer WHERE cus_kode = ? LIMIT 1`,
+                        [candidate],
+                    );
+                    if (exists?.length) {
+                        await conn.rollback();
+                        continue;
+                    }
+
+                    await conn.query(
+                        `
+                        INSERT INTO tcustomer (
+                            cus_kode,
+                            cus_nama,
+                            cus_alamat,
+                            cus_kota,
+                            cus_telp,
+                            cus_cp,
+                            cus_email,
+                            cus_korporasi,
+                            cus_jenisusaha,
+                            cus_npwp,
+                            cus_nama_npwp,
+                            cus_alamat_npwp,
+                            cus_kota_npwp,
+                            cus_aktif,
+                            user_create,
+                            date_create
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW())
+                        `,
+                        [
+                            candidate,
+                            nama,
+                            alamat,
+                            kota,
+                            telp,
+                            cp,
+                            email,
+                            korporasi,
+                            korporasi === "Y" ? jenisUsaha : "",
+                            korporasi === "Y" ? npwp : "",
+                            korporasi === "Y" ? namaNpwp : "",
+                            korporasi === "Y" ? alamatNpwp : "",
+                            korporasi === "Y" ? kotaNpwp : "",
+                            actor,
+                        ],
+                    );
+
+                    await conn.commit();
+                    return candidate;
+                }
+
+                throw new Error("Gagal membuat kode customer unik");
+            } finally {
+                if (conn) {
+                    conn.release();
+                    conn = null;
+                }
+            }
+        });
+
+        return res.status(201).json({
+            success: true,
+            data: {
+                kode,
+                nama,
+            },
+        });
+    } catch (err) {
+        if (conn) {
+            try {
+                await conn.rollback();
+            } catch {}
+            conn.release();
+        }
+        return res.status(500).json({
+            success: false,
+            message:
+                err.sqlMessage || err.message || "Gagal menambahkan customer",
+        });
+    }
+};
+
 module.exports = {
     getPermintaanHargaList,
     getPermintaanHargaDetail,
     createPermintaanHarga,
     updatePermintaanHarga,
+    createPermintaanHargaCustomer,
     copyPermintaanHarga,
     deletePermintaanHarga,
     uploadPermintaanHargaImage,

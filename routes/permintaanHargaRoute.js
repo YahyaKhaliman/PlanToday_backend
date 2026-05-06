@@ -13,6 +13,11 @@ router.get(
     controller.getPermintaanHargaDetail,
 );
 router.post("/permintaan-harga", auth, controller.createPermintaanHarga);
+router.post(
+    "/permintaan-harga/customer",
+    auth,
+    controller.createPermintaanHargaCustomer,
+);
 router.put("/permintaan-harga/:nomor", auth, controller.updatePermintaanHarga);
 router.post(
     "/permintaan-harga/:nomor/copy",
