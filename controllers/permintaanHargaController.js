@@ -1016,8 +1016,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
             .trim()
             .replace(/[^A-Z0-9.\-_/]/gi, "_");
         const suffix = slot === "2" ? "-2" : "";
-        // TEMP TEST: tambahkan marker _tes agar tidak menimpa file lama saat pengujian.
-        const fileName = `${safeNomor}${suffix}_tes.${ext}`;
+        const fileName = `${safeNomor}${suffix}.${ext}`;
         const targetPath = path.join(UPLOAD_DIR, fileName);
 
         await fs.promises.writeFile(targetPath, buffer);
