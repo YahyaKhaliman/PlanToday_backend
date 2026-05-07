@@ -5,6 +5,9 @@ const { resolveSalesIdentity } = require("../utils/salesIdentityResolver");
 const CREATE_PENAWARAN_DEDUPE_TTL_MS = 30 * 1000;
 const createPenawaranInFlight = new Map();
 
+const toShortKey = (value, maxLen = 12) =>
+    String(value || "").slice(0, Math.max(1, Number(maxLen) || 12));
+
 const buildCreatePenawaranFingerprint = ({
     tanggal,
     divisi,
@@ -56,8 +59,15 @@ const acquireCreatePenawaranLock = ({ fingerprint, traceId }) => {
     const now = Date.now();
     const existing = createPenawaranInFlight.get(fingerprint);
     if (existing && existing.expiresAt > now) {
+        console.log("[PenawaranCreate][LOCK] acquire:blocked", {
+            traceId,
+            lockKey: toShortKey(fingerprint),
+            inFlightTraceId: existing.traceId,
+            ttlRemainingMs: existing.expiresAt - now,
+        });
         return {
             acquired: false,
+            fingerprint,
             traceId,
             inFlightTraceId: existing.traceId,
         };
@@ -68,14 +78,37 @@ const acquireCreatePenawaranLock = ({ fingerprint, traceId }) => {
         expiresAt: now + CREATE_PENAWARAN_DEDUPE_TTL_MS,
     });
 
-    return { acquired: true, traceId };
+    console.log("[PenawaranCreate][LOCK] acquire:ok", {
+        traceId,
+        lockKey: toShortKey(fingerprint),
+        ttlMs: CREATE_PENAWARAN_DEDUPE_TTL_MS,
+    });
+
+    return { acquired: true, fingerprint, traceId };
 };
 
 const releaseCreatePenawaranLock = ({ fingerprint, traceId }) => {
     const existing = createPenawaranInFlight.get(fingerprint);
-    if (!existing) return;
-    if (existing.traceId !== traceId) return;
+    if (!existing) {
+        console.log("[PenawaranCreate][LOCK] release:skip-missing", {
+            traceId,
+            lockKey: toShortKey(fingerprint),
+        });
+        return;
+    }
+    if (existing.traceId !== traceId) {
+        console.log("[PenawaranCreate][LOCK] release:skip-owner-mismatch", {
+            traceId,
+            lockKey: toShortKey(fingerprint),
+            ownerTraceId: existing.traceId,
+        });
+        return;
+    }
     createPenawaranInFlight.delete(fingerprint);
+    console.log("[PenawaranCreate][LOCK] release:ok", {
+        traceId,
+        lockKey: toShortKey(fingerprint),
+    });
 };
 
 const buildDetailDedupKey = (detail) => {
@@ -982,6 +1015,12 @@ const createPenawaran = async (req, res) => {
             note,
             details: dedupedDetails,
         });
+        const lockKey = toShortKey(payloadFingerprint);
+
+        console.log("[PenawaranCreate][API] lock:prepare", {
+            traceId,
+            lockKey,
+        });
 
         lockState = acquireCreatePenawaranLock({
             fingerprint: payloadFingerprint,
@@ -994,6 +1033,7 @@ const createPenawaran = async (req, res) => {
                 message:
                     "Permintaan create penawaran yang sama sedang diproses",
                 trace_id: traceId,
+                in_flight_trace_id: lockState.inFlightTraceId,
             });
         }
 
@@ -1193,6 +1233,16 @@ const createPenawaran = async (req, res) => {
             ],
         );
 
+        const [beforeCountRows] = await conn.query(
+            `
+            SELECT COUNT(*) AS total
+            FROM tpenawaran_dtl
+            WHERE pend_pen_nomor = ?
+            `,
+            [nomor],
+        );
+        const beforeInsertedCount = toNumber(beforeCountRows?.[0]?.total, 0);
+
         for (let i = 0; i < dedupedDetails.length; i += 1) {
             const d = dedupedDetails[i] || {};
             const urutan = i + 1;
@@ -1252,9 +1302,10 @@ const createPenawaran = async (req, res) => {
             [nomor],
         );
         const insertedCount = toNumber(countRows?.[0]?.total, 0);
-        if (insertedCount !== dedupedDetails.length) {
+        const insertedDelta = insertedCount - beforeInsertedCount;
+        if (insertedDelta !== dedupedDetails.length) {
             throw new Error(
-                `Jumlah detail tersimpan tidak konsisten. expected=${dedupedDetails.length}, actual=${insertedCount}`,
+                `Jumlah detail tersimpan tidak konsisten. expected=${dedupedDetails.length}, actual_delta=${insertedDelta}, before=${beforeInsertedCount}, after=${insertedCount}`,
             );
         }
 
@@ -1298,6 +1349,10 @@ const createPenawaran = async (req, res) => {
         });
     } finally {
         if (lockState?.acquired) {
+            console.log("[PenawaranCreate][API] lock:release-requested", {
+                traceId: lockState.traceId,
+                lockKey: toShortKey(lockState.fingerprint),
+            });
             releaseCreatePenawaranLock(lockState);
         }
         if (conn) {

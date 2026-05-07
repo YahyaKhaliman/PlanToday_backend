@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const db = require("../config/dbPenawaran");
+const { UPLOAD_DIR } = require("../middleware/uploadPermintaanHarga");
 
 const nomorLocks = new Map();
 
@@ -146,10 +147,10 @@ const buildImageBaseUrl = () => resolveImagePublicOrigin();
 const buildImagePaths = (nomor) => {
     const safeNomor = String(nomor || "").trim();
     return {
-        delphi1: `/image/mintaharga/${safeNomor}.jpg`,
-        delphi2: `/image/mintaharga/${safeNomor}-2.jpg`,
-        legacy1: `/image/mintaharga/${safeNomor}.jpg`,
-        legacy2: `/image/mintaharga/${safeNomor}-2.jpg`,
+        delphi1: `/images/mintaharga/${safeNomor}.jpg`,
+        delphi2: `/images/mintaharga/${safeNomor}-2.jpg`,
+        legacy1: `/images/mintaharga/${safeNomor}.jpg`,
+        legacy2: `/images/mintaharga/${safeNomor}-2.jpg`,
     };
 };
 
@@ -437,12 +438,9 @@ const getPermintaanHargaDetail = async (req, res) => {
             imagePath2: imagePaths.delphi2,
         });
 
+        // TEMP TEST: sederhanakan payload, kirim hanya field URL yang dipakai FE.
         row.gambar_1_url = withBase(imagePaths.delphi1);
         row.gambar_2_url = withBase(imagePaths.delphi2);
-        row.gambar_1_legacy_url = withBase(imagePaths.legacy1);
-        row.gambar_2_legacy_url = withBase(imagePaths.legacy2);
-        row.image1 = row.gambar_1_url;
-        row.image2 = row.gambar_2_url;
 
         return res.json({ success: true, data: row });
     } catch (err) {
@@ -873,6 +871,196 @@ const uploadPermintaanHargaImage = async (req, res) => {
     }
 };
 
+// TEMP TEST: endpoint uploader internal untuk uji upload file tanpa validasi DB/status.
+const uploadPermintaanHargaImageInternal = async (req, res) => {
+    try {
+        const nomor = String(req.params.nomor || "").trim();
+        const slot = String(req.params.slot || "1").trim();
+
+        if (!nomor) {
+            return res.status(400).json({
+                success: false,
+                message: "Nomor wajib diisi",
+            });
+        }
+
+        if (!["1", "2"].includes(slot)) {
+            return res.status(400).json({
+                success: false,
+                message: "Slot gambar hanya 1 atau 2",
+            });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "File gambar wajib diunggah",
+            });
+        }
+
+        const baseUrl = buildImageBaseUrl();
+        const imagePaths = buildImagePaths(nomor);
+        const currentPath =
+            String(slot) === "2" ? imagePaths.delphi2 : imagePaths.delphi1;
+        const legacyPath =
+            String(slot) === "2" ? imagePaths.legacy2 : imagePaths.legacy1;
+        const withBase = (p) => (baseUrl ? `${baseUrl}${p}` : p);
+
+        console.log("[PermintaanHarga][Upload][Internal][Result]", {
+            nomor,
+            slot,
+            savedFile: req.file?.filename,
+            mimeType: req.file?.mimetype,
+            size: req.file?.size,
+            destination: req.file?.destination,
+            path: req.file?.path,
+            baseUrl,
+            currentPath,
+            legacyPath,
+        });
+
+        return res.json({
+            success: true,
+            message: "Upload internal berhasil",
+            data: {
+                nomor,
+                slot,
+                file: req.file.filename,
+                destination: req.file.destination,
+                path: req.file.path,
+                url: withBase(currentPath),
+                legacy_url: withBase(legacyPath),
+            },
+        });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            message:
+                err.sqlMessage || err.message || "Gagal upload internal gambar",
+        });
+    }
+};
+
+// TEMP TEST: endpoint upload JSON base64 untuk bypass masalah multipart dari RN emulator.
+const uploadPermintaanHargaImageBase64 = async (req, res) => {
+    try {
+        const nomor = String(req.params.nomor || "").trim();
+        const slot = String(req.params.slot || "1").trim();
+        if (!["1", "2"].includes(slot)) {
+            return res.status(400).json({
+                success: false,
+                message: "Slot gambar hanya 1 atau 2",
+            });
+        }
+
+        const [rows] = await db.query(
+            `SELECT mh_nomor, mh_status, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
+            [nomor],
+        );
+        if (!rows?.length) {
+            return res
+                .status(404)
+                .json({ success: false, message: "Data tidak ditemukan" });
+        }
+        if (
+            isSalesUser(req) &&
+            String(rows[0].user_create || "").trim() !== resolveActor(req)
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: "Tidak berhak upload gambar untuk data ini",
+            });
+        }
+
+        if (
+            String(rows[0].mh_status || "")
+                .trim()
+                .toUpperCase() !== "BELUM"
+        ) {
+            return res.status(409).json({
+                success: false,
+                message: "Upload gambar hanya diizinkan untuk status BELUM",
+            });
+        }
+
+        const dataUrl = String(req.body?.file_base64 || "").trim();
+        if (!dataUrl) {
+            return res.status(400).json({
+                success: false,
+                message: "Payload file_base64 wajib diisi",
+            });
+        }
+
+        const matched = dataUrl.match(
+            /^data:(image\/(jpeg|jpg|png));base64,(.+)$/i,
+        );
+        if (!matched) {
+            return res.status(400).json({
+                success: false,
+                message: "Format base64 tidak valid",
+            });
+        }
+
+        const mimeType = String(matched[1] || "image/jpeg").toLowerCase();
+        const ext = mimeType.includes("png") ? "png" : "jpg";
+        const b64 = String(matched[3] || "");
+        const buffer = Buffer.from(b64, "base64");
+        if (!buffer.length) {
+            return res.status(400).json({
+                success: false,
+                message: "Konten gambar kosong",
+            });
+        }
+
+        const safeNomor = String(nomor || "")
+            .trim()
+            .replace(/[^A-Z0-9.\-_/]/gi, "_");
+        const suffix = slot === "2" ? "-2" : "";
+        // TEMP TEST: tambahkan marker _tes agar tidak menimpa file lama saat pengujian.
+        const fileName = `${safeNomor}${suffix}_tes.${ext}`;
+        const targetPath = path.join(UPLOAD_DIR, fileName);
+
+        await fs.promises.writeFile(targetPath, buffer);
+
+        const baseUrl = buildImageBaseUrl();
+        const imagePaths = buildImagePaths(nomor);
+        const currentPath =
+            String(slot) === "2" ? imagePaths.delphi2 : imagePaths.delphi1;
+        const legacyPath =
+            String(slot) === "2" ? imagePaths.legacy2 : imagePaths.legacy1;
+        const withBase = (p) => (baseUrl ? `${baseUrl}${p}` : p);
+
+        console.log("[PermintaanHarga][Upload][Base64][Result]", {
+            nomor,
+            slot,
+            mimeType,
+            bytes: buffer.length,
+            fileName,
+            uploadDir: UPLOAD_DIR,
+            targetPath,
+        });
+
+        return res.json({
+            success: true,
+            message: "Upload base64 berhasil",
+            data: {
+                nomor,
+                slot,
+                file: fileName,
+                path: targetPath,
+                url: withBase(currentPath),
+                legacy_url: withBase(legacyPath),
+            },
+        });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            message:
+                err.sqlMessage || err.message || "Gagal upload base64 gambar",
+        });
+    }
+};
+
 const createPermintaanHargaCustomer = async (req, res) => {
     let conn;
     try {
@@ -1037,4 +1225,6 @@ module.exports = {
     copyPermintaanHarga,
     deletePermintaanHarga,
     uploadPermintaanHargaImage,
+    uploadPermintaanHargaImageInternal,
+    uploadPermintaanHargaImageBase64,
 };
