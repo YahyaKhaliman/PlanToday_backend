@@ -500,9 +500,14 @@ const getPermintaanHargaDetail = async (req, res) => {
             imagePath2: imagePaths.delphi2,
         });
 
-        // TEMP TEST: sederhanakan payload, kirim hanya field URL yang dipakai FE.
+        // Backward-compatible: tetap kirim URL publik + path/filename agar FE edit
+        // bisa membedakan gambar existing (server) vs gambar baru (local uri).
         row.gambar_1_url = withBase(imagePaths.delphi1);
         row.gambar_2_url = withBase(imagePaths.delphi2);
+        row.gambar_1_path = imagePaths.delphi1;
+        row.gambar_2_path = imagePaths.delphi2;
+        row.gambar_1_file = `${row.mh_nomor}.jpg`;
+        row.gambar_2_file = `${row.mh_nomor}-2.jpg`;
 
         return res.json({ success: true, data: row });
     } catch (err) {
