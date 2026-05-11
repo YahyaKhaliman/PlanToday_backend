@@ -200,6 +200,79 @@ const isManagerUser = (user) =>
         .trim()
         .toUpperCase() === "MANAGER";
 
+const getOwnerCandidates = (req) =>
+    Array.from(
+        new Set(
+            [req.user?.nama, req.user?.id]
+                .map((v) => String(v || "").trim())
+                .filter(Boolean),
+        ),
+    );
+
+const getAuthSalesKode = (req) => String(req.user?.sales_kode || "").trim();
+
+const assertPenawaranOwnership = async ({ conn, nomor, req }) => {
+    const managerRole = isManagerUser(req.user);
+    const authSalesKode = getAuthSalesKode(req);
+
+    if (managerRole) {
+        return { allowed: true, ownerSalesKode: "", managerRole: true };
+    }
+
+    if (!authSalesKode) {
+        return {
+            allowed: false,
+            statusCode: 403,
+            message: "Sales tidak valid (sales_kode kosong)",
+        };
+    }
+
+    const [ownerRows] = await conn.query(
+        `
+        SELECT COALESCE(pen_sal_kode, '') AS owner_sales_kode
+        FROM tpenawaran_hdr
+        WHERE pen_nomor = ?
+        LIMIT 1
+        `,
+        [nomor],
+    );
+
+    if (!ownerRows?.length) {
+        return {
+            allowed: false,
+            statusCode: 404,
+            message: "Penawaran tidak ditemukan",
+        };
+    }
+
+    const ownerSalesKode = String(ownerRows[0]?.owner_sales_kode || "").trim();
+    const allowed = ownerSalesKode === authSalesKode;
+
+    if (
+        String(process.env.PENAWARAN_DEBUG_AUTH || "")
+            .trim()
+            .toLowerCase() === "1"
+    ) {
+        console.log("[Penawaran][OwnershipCheck]", {
+            nomor,
+            managerRole,
+            authSalesKode,
+            ownerSalesKode,
+            allowed,
+        });
+    }
+
+    if (!allowed) {
+        return {
+            allowed: false,
+            statusCode: 403,
+            message: "Tidak berhak mengakses penawaran ini",
+        };
+    }
+
+    return { allowed: true, ownerSalesKode, managerRole: false };
+};
+
 const normalizePerusahaanLookupKey = (value) =>
     String(value || "")
         .trim()
@@ -662,6 +735,16 @@ const getPenawaranList = async (req, res) => {
         const schemaReady = await ensurePenawaranSchema(res);
         if (!schemaReady) return;
 
+        const managerRole = isManagerUser(req.user);
+        const ownerCandidates = getOwnerCandidates(req);
+        const authSalesKode = getAuthSalesKode(req);
+        if (!managerRole && !authSalesKode) {
+            return res.status(403).json({
+                success: false,
+                message: "Sales tidak valid (sales_kode kosong)",
+            });
+        }
+
         const monthRange = getCurrentMonthRange();
         const startDate =
             normalizeDate(req.query.startDate) || monthRange.start;
@@ -707,6 +790,31 @@ const getPenawaranList = async (req, res) => {
 
         params.push(limit);
 
+        const queryParams = [];
+        if (statusInfo.value) {
+            // placeholder untuk statusCountParam
+            queryParams.push(statusInfo.value);
+        }
+        // placeholder untuk range tanggal di WHERE
+        queryParams.push(startDate, endDate);
+        // placeholder untuk owner filter di WHERE (sales only)
+        if (!managerRole) {
+            queryParams.push(authSalesKode);
+        }
+        if (statusInfo.value) {
+            // placeholder untuk existsParam
+            queryParams.push(statusInfo.value);
+        }
+        if (search) {
+            const like = `%${search}%`;
+            queryParams.push(like, like, like, like);
+        }
+        queryParams.push(limit);
+
+        const ownerFilterSql = managerRole
+            ? ""
+            : "AND COALESCE(h.pen_sal_kode, '') = ?";
+
         const sql = `
         SELECT
             h.pen_nomor AS nomor,
@@ -751,6 +859,7 @@ const getPenawaranList = async (req, res) => {
         LEFT JOIN tdivisi v ON v.kode = h.pen_divisi
         WHERE h.pen_tanggal >= ?
           AND h.pen_tanggal <= ?
+          ${ownerFilterSql}
           AND EXISTS (
               SELECT 1
               FROM tpenawaran_dtl d
@@ -761,7 +870,7 @@ const getPenawaranList = async (req, res) => {
         ORDER BY h.pen_tanggal DESC, h.pen_nomor DESC
         LIMIT ?`;
 
-        const [rows] = await db.query(sql, params);
+        const [rows] = await db.query(sql, queryParams);
 
         return res.json({
             success: true,
@@ -790,6 +899,16 @@ const getPenawaranDetail = async (req, res) => {
         const schemaReady = await ensurePenawaranSchema(res);
         if (!schemaReady) return;
 
+        const managerRole = isManagerUser(req.user);
+        const ownerCandidates = getOwnerCandidates(req);
+        const authSalesKode = getAuthSalesKode(req);
+        if (!managerRole && !authSalesKode) {
+            return res.status(403).json({
+                success: false,
+                message: "Sales tidak valid (sales_kode kosong)",
+            });
+        }
+
         const nomor = String(req.params.nomor || "").trim();
 
         if (!nomor) {
@@ -798,6 +917,10 @@ const getPenawaranDetail = async (req, res) => {
                 message: "Nomor penawaran tidak valid",
             });
         }
+
+        const ownerFilterSql = managerRole
+            ? ""
+            : "AND COALESCE(h.pen_sal_kode, '') = ?";
 
         const [headerRows] = await db.query(
             `
@@ -859,9 +982,10 @@ const getPenawaranDetail = async (req, res) => {
             LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
             LEFT JOIN tdivisi v ON v.kode = h.pen_divisi
             WHERE h.pen_nomor = ?
+              ${ownerFilterSql}
             LIMIT 1
             `,
-            [nomor],
+            managerRole ? [nomor] : [nomor, authSalesKode],
         );
 
         if (!headerRows || headerRows.length === 0) {
@@ -1782,6 +1906,14 @@ const updatePenawaranStatusDetail = async (req, res) => {
             });
         }
 
+        const ownership = await assertPenawaranOwnership({ conn, nomor, req });
+        if (!ownership.allowed) {
+            return res.status(ownership.statusCode || 403).json({
+                success: false,
+                message: ownership.message || "Tidak berhak mengakses data",
+            });
+        }
+
         await conn.beginTransaction();
 
         const [headerRows] = await conn.query(
@@ -2062,6 +2194,14 @@ const requestApprovalPerubahan = async (req, res) => {
             });
         }
 
+        const ownership = await assertPenawaranOwnership({ conn, nomor, req });
+        if (!ownership.allowed) {
+            return res.status(ownership.statusCode || 403).json({
+                success: false,
+                message: ownership.message || "Tidak berhak mengakses data",
+            });
+        }
+
         await conn.beginTransaction();
 
         const [headerRows] = await conn.query(
@@ -2175,6 +2315,18 @@ const getPenawaranActivityLogs = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "Nomor penawaran tidak valid",
+            });
+        }
+
+        const ownership = await assertPenawaranOwnership({
+            conn: db,
+            nomor,
+            req,
+        });
+        if (!ownership.allowed) {
+            return res.status(ownership.statusCode || 403).json({
+                success: false,
+                message: ownership.message || "Tidak berhak mengakses data",
             });
         }
 

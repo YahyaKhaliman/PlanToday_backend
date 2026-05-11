@@ -2,10 +2,109 @@ const jwt = require("jsonwebtoken");
 const db = require("../config/dbMain");
 const { resolveSalesIdentity } = require("../utils/salesIdentityResolver");
 
+const extractToken = (req) => {
+    const rawAuthorization = String(req.headers.authorization || "").trim();
+
+    // Normal form: Authorization: Bearer <token> (case-insensitive)
+    const bearerMatch = rawAuthorization.match(/^Bearer\s+(.+)$/i);
+    if (bearerMatch?.[1]) {
+        return String(bearerMatch[1]).trim();
+    }
+
+    // Fallback 1: token mentah di Authorization header
+    if (rawAuthorization && !rawAuthorization.includes(" ")) {
+        return rawAuthorization;
+    }
+
+    // Fallback 2: common custom headers
+    const xAccessToken = String(req.headers["x-access-token"] || "").trim();
+    if (xAccessToken) return xAccessToken;
+
+    const xAuthToken = String(req.headers["x-auth-token"] || "").trim();
+    if (xAuthToken) return xAuthToken;
+
+    const tokenHeader = String(req.headers.token || "").trim();
+    if (tokenHeader) return tokenHeader;
+
+    const authTokenHeader = String(req.headers["auth-token"] || "").trim();
+    if (authTokenHeader) return authTokenHeader;
+
+    const jwtHeader = String(req.headers.jwt || "").trim();
+    if (jwtHeader) return jwtHeader;
+
+    // Fallback 3: query/body token (legacy clients)
+    const queryToken = String(
+        req.query?.token || req.query?.access_token || "",
+    ).trim();
+    if (queryToken) return queryToken;
+
+    const bodyToken = String(
+        req.body?.token || req.body?.access_token || "",
+    ).trim();
+    if (bodyToken) return bodyToken;
+
+    const cookieRaw = String(req.headers.cookie || "").trim();
+    if (cookieRaw) {
+        const matched = cookieRaw.match(
+            /(?:^|;\s*)(?:token|access_token)=([^;]+)/i,
+        );
+        if (matched?.[1]) return String(matched[1]).trim();
+    }
+
+    return "";
+};
+
 module.exports = async function auth(req, res, next) {
     try {
-        const header = req.headers.authorization || "";
-        const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+        const token = extractToken(req)
+            .trim()
+            .replace(/^"|"$/g, "")
+            .replace(/^'|'$/g, "");
+
+        if (
+            String(process.env.AUTH_DEBUG || "")
+                .trim()
+                .toLowerCase() === "1"
+        ) {
+            console.log("[Auth][TokenExtract]", {
+                path: req.path,
+                method: req.method,
+                hasAuthorization: Boolean(req.headers.authorization),
+                hasXAccessToken: Boolean(req.headers["x-access-token"]),
+                hasXAuthToken: Boolean(req.headers["x-auth-token"]),
+                hasTokenHeader: Boolean(req.headers.token),
+                hasAuthTokenHeader: Boolean(req.headers["auth-token"]),
+                hasJwtHeader: Boolean(req.headers.jwt),
+                hasQueryToken: Boolean(
+                    req.query?.token || req.query?.access_token,
+                ),
+                hasBodyToken: Boolean(
+                    req.body?.token || req.body?.access_token,
+                ),
+                hasCookieHeader: Boolean(req.headers.cookie),
+                tokenExtracted: Boolean(token),
+            });
+        }
+
+        if (
+            String(process.env.AUTH_DEBUG_PENAWARAN || "")
+                .trim()
+                .toLowerCase() === "1" &&
+            String(req.path || "").startsWith("/penawaran")
+        ) {
+            const authHeader = String(req.headers.authorization || "");
+            const authPreview = authHeader
+                ? `${authHeader.slice(0, 20)}...len=${authHeader.length}`
+                : "";
+            console.log("[Auth][Penawaran][TokenCheck]", {
+                path: req.path,
+                method: req.method,
+                hasAuthorization: Boolean(req.headers.authorization),
+                authPreview,
+                tokenExtracted: Boolean(token),
+            });
+        }
+
         if (!token) {
             return res.status(401).json({
                 success: false,

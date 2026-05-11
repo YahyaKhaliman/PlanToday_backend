@@ -46,7 +46,7 @@ const login = async (req, res) => {
         });
 
         await db.query(
-            `INSERT INTO log_plantoday
+            `INSERT INTO marketing.log_plantoday
         (log_nama, log_cabang, log_versi_app, tanggal, log_phoneid)
         VALUES (?, ?, ?, NOW(), ?)`,
             [user.kar_nama, user.kar_cabang, versiApp || "", deviceId || ""],
@@ -158,11 +158,13 @@ const checkDevice = async (req, res) => {
 
     try {
         const [rows] = await db.query(
-            `SELECT kar_nama
-        FROM tkaryawan
-        WHERE kar_registrasi = ?
-        AND kar_isaktif = 1
-        LIMIT 1`,
+            `SELECT l.log_nama AS kar_nama
+         FROM marketing.log_plantoday l
+         INNER JOIN tkaryawan k ON k.kar_nama = l.log_nama
+         WHERE l.log_phoneid = ?
+           AND k.kar_isaktif = 1
+         ORDER BY l.tanggal DESC
+         LIMIT 1`,
             [deviceId],
         );
 

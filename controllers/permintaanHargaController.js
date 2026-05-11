@@ -51,6 +51,19 @@ const isSalesUser = (req) =>
         .trim()
         .toUpperCase() === "SALES";
 
+const isManagerUser = (req) =>
+    String(req.user?.jabatan || "")
+        .trim()
+        .toUpperCase() === "MANAGER";
+
+const isOwnedBySalesKode = (req, row = {}) => {
+    const authSalesKode = String(req.user?.sales_kode || "").trim();
+    const rowSalesKode = String(
+        row?.mh_sal_kode || row?.pen_sal_kode || "",
+    ).trim();
+    return Boolean(authSalesKode) && rowSalesKode === authSalesKode;
+};
+
 const resolveActor = (req) =>
     String(
         req.user?.nama || req.user?.id || req.body?.user || "MOBILE",
@@ -271,12 +284,39 @@ const getPermintaanHargaList = async (req, res) => {
             ),
         );
         const salesRole = isSalesUser(req);
+        const ownerCandidates = Array.from(
+            new Set(
+                [req.user?.nama, req.user?.id]
+                    .map((v) => String(v || "").trim())
+                    .filter(Boolean),
+            ),
+        );
+        const authSalesKode = String(req.user?.sales_kode || "").trim();
+
+        const managerRole = isManagerUser(req);
+        if (!managerRole && !ownerCandidates.length) {
+            return res.status(403).json({
+                success: false,
+                message: "User tidak valid",
+            });
+        }
 
         const where = [
             "m.mh_tanggal >= ?",
             "m.mh_tanggal < DATE_ADD(?, INTERVAL 1 DAY)",
         ];
         const params = [startDate, endDate];
+
+        if (!managerRole) {
+            if (!authSalesKode) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Sales tidak valid (sales_kode kosong)",
+                });
+            }
+            where.unshift("COALESCE(m.mh_sal_kode,'') = ?");
+            params.unshift(authSalesKode);
+        }
 
         if (status) {
             where.push("COALESCE(m.mh_status,'') = ?");
@@ -308,6 +348,7 @@ const getPermintaanHargaList = async (req, res) => {
                 actorCandidates,
                 actorCandidatesNormalized,
                 salesRole,
+                managerRole,
                 bypassSalesFilter,
                 startDate,
                 endDate,
@@ -381,12 +422,32 @@ const getPermintaanHargaList = async (req, res) => {
 const getPermintaanHargaDetail = async (req, res) => {
     try {
         const nomor = String(req.params.nomor || "").trim();
+        const ownerCandidates = Array.from(
+            new Set(
+                [req.user?.nama, req.user?.id]
+                    .map((v) => String(v || "").trim())
+                    .filter(Boolean),
+            ),
+        );
+
+        const managerRole = isManagerUser(req);
+        if (!managerRole && !ownerCandidates.length) {
+            return res.status(403).json({
+                success: false,
+                message: "User tidak valid",
+            });
+        }
+
         if (!nomor) {
             return res
                 .status(400)
                 .json({ success: false, message: "Nomor tidak valid" });
         }
 
+        const authSalesKode = String(req.user?.sales_kode || "").trim();
+        const whereUserCreate = managerRole
+            ? ""
+            : "AND COALESCE(h.mh_sal_kode,'') = ?";
         const [rows] = await db.query(
             `
             SELECT
@@ -415,9 +476,10 @@ const getPermintaanHargaDetail = async (req, res) => {
             LEFT JOIN tdivisi v ON v.kode=h.mh_divisi
             LEFT JOIN tsales s ON s.sal_kode=h.mh_sal_kode
             WHERE h.mh_nomor = ?
+              ${whereUserCreate}
             LIMIT 1
             `,
-            [nomor],
+            managerRole ? [nomor] : [nomor, authSalesKode],
         );
 
         if (!rows?.length) {
@@ -552,10 +614,7 @@ const updatePermintaanHarga = async (req, res) => {
                 .status(404)
                 .json({ success: false, message: "Data tidak ditemukan" });
         }
-        if (
-            isSalesUser(req) &&
-            String(rows[0].user_create || "").trim() !== actor
-        ) {
+        if (isSalesUser(req) && !isOwnedBySalesKode(req, rows[0])) {
             return res.status(403).json({
                 success: false,
                 message: "Tidak berhak mengubah data ini",
@@ -651,10 +710,7 @@ const copyPermintaanHarga = async (req, res) => {
         }
 
         const source = rows[0];
-        if (
-            isSalesUser(req) &&
-            String(source.user_create || "").trim() !== actor
-        ) {
+        if (isSalesUser(req) && !isOwnedBySalesKode(req, source)) {
             return res.status(403).json({
                 success: false,
                 message: "Tidak berhak copy data ini",
@@ -754,10 +810,7 @@ const deletePermintaanHarga = async (req, res) => {
                 .status(404)
                 .json({ success: false, message: "Data tidak ditemukan" });
         }
-        if (
-            isSalesUser(req) &&
-            String(rows[0].user_create || "").trim() !== actor
-        ) {
+        if (isSalesUser(req) && !isOwnedBySalesKode(req, rows[0])) {
             return res.status(403).json({
                 success: false,
                 message: "Tidak berhak menghapus data ini",
@@ -812,10 +865,7 @@ const uploadPermintaanHargaImage = async (req, res) => {
                 .status(404)
                 .json({ success: false, message: "Data tidak ditemukan" });
         }
-        if (
-            isSalesUser(req) &&
-            String(rows[0].user_create || "").trim() !== resolveActor(req)
-        ) {
+        if (isSalesUser(req) && !isOwnedBySalesKode(req, rows[0])) {
             return res.status(403).json({
                 success: false,
                 message: "Tidak berhak upload gambar untuk data ini",
@@ -962,10 +1012,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
                 .status(404)
                 .json({ success: false, message: "Data tidak ditemukan" });
         }
-        if (
-            isSalesUser(req) &&
-            String(rows[0].user_create || "").trim() !== resolveActor(req)
-        ) {
+        if (isSalesUser(req) && !isOwnedBySalesKode(req, rows[0])) {
             return res.status(403).json({
                 success: false,
                 message: "Tidak berhak upload gambar untuk data ini",

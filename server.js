@@ -32,6 +32,7 @@ app.use("/api", require("./routes/authRoute"));
 app.use("/api", require("./routes/homeRoute"));
 app.use("/api", require("./routes/kurirRoute"));
 app.use("/api", require("./routes/penawaranRoute"));
+app.use("/api", require("./routes/trackingPenawaranRoute"));
 app.use("/api", require("./routes/permintaanHargaRoute"));
 
 app.listen(process.env.PORT, "0.0.0.0", () => {

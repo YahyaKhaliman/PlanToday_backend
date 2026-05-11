@@ -3,8 +3,8 @@ const router = express.Router();
 const penawaranController = require("../controllers/penawaranController");
 const auth = require("../middleware/auth");
 
-router.get("/penawaran", penawaranController.getPenawaranList);
-router.get("/penawaran/:nomor", penawaranController.getPenawaranDetail);
+router.get("/penawaran", auth, penawaranController.getPenawaranList);
+router.get("/penawaran/:nomor", auth, penawaranController.getPenawaranDetail);
 router.post("/penawaran", auth, penawaranController.createPenawaran);
 router.put(
     "/penawaran/:nomor/status",
@@ -18,6 +18,7 @@ router.post(
 );
 router.get(
     "/penawaran/:nomor/activity-logs",
+    auth,
     penawaranController.getPenawaranActivityLogs,
 );
 router.get(
