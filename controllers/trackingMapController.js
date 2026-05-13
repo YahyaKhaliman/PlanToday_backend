@@ -78,7 +78,12 @@ const getTrackingMapList = async (req, res) => {
                 DATE_FORMAT(m.mspk_tanggal, '%Y-%m-%d') AS tanggal_map,
                 DATE_FORMAT(MAX(k.date_create), '%Y-%m-%d') AS tanggal_bast,
                 DATE_FORMAT(MAX(sh.SJ_Tanggal), '%Y-%m-%d') AS tanggal_sj_map,
-                MAX(COALESCE(sh.SJ_Nomor, '')) AS nomor_sj
+                MAX(COALESCE(sh.SJ_Nomor, '')) AS nomor_sj,
+                MAX(COALESCE(m.mspk_nama, '')) AS mspk_nama,
+                MAX(COALESCE(m.mspk_ukuran, '')) AS mspk_ukuran,
+                MAX(COALESCE(m.mspk_kain, '')) AS mspk_kain,
+                MAX(COALESCE(m.mspk_finishing, '')) AS mspk_finishing,
+                MAX(COALESCE(m.mspk_keterangan, '')) AS mspk_keterangan
             FROM tmemospk m
             INNER JOIN tpenawaran_hdr h
                 ON h.pen_nomor = m.mspk_pen_nomor
