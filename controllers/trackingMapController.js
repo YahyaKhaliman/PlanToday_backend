@@ -60,19 +60,21 @@ const getTrackingMapList = async (req, res) => {
             searchSql = `
                 AND (
                     COALESCE(m.mspk_nomor, '') LIKE ?
-                    OR COALESCE(c.cus_nama, '') LIKE ?
-                    OR COALESCE(c.cus_alamat, '') LIKE ?
+                    OR COALESCE(ch.cus_nama, '') LIKE ?
+                    OR COALESCE(ch.cus_alamat, '') LIKE ?
+                    OR COALESCE(cm.cus_nama, '') LIKE ?
+                    OR COALESCE(cm.cus_alamat, '') LIKE ?
                     OR COALESCE(sh.SJ_Nomor, '') LIKE ?
                 )`;
-            params.push(like, like, like, like);
+            params.push(like, like, like, like, like, like);
         }
 
         const [rows] = await db.query(
             `
             SELECT
                 COALESCE(m.mspk_nomor, '') AS no_map,
-                COALESCE(c.cus_nama, '') AS customer,
-                COALESCE(c.cus_alamat, '') AS alamat,
+                COALESCE(NULLIF(cm.cus_nama, ''), COALESCE(ch.cus_nama, '')) AS customer,
+                COALESCE(NULLIF(cm.cus_alamat, ''), COALESCE(ch.cus_alamat, '')) AS alamat,
                 DATE_FORMAT(m.mspk_tanggal, '%Y-%m-%d') AS tanggal_map,
                 DATE_FORMAT(MAX(k.date_create), '%Y-%m-%d') AS tanggal_bast,
                 DATE_FORMAT(MAX(sh.SJ_Tanggal), '%Y-%m-%d') AS tanggal_sj_map,
@@ -80,8 +82,10 @@ const getTrackingMapList = async (req, res) => {
             FROM tmemospk m
             INNER JOIN tpenawaran_hdr h
                 ON h.pen_nomor = m.mspk_pen_nomor
-            LEFT JOIN tcustomer c
-                ON c.cus_kode = h.pen_cus_kode
+            LEFT JOIN tcustomer ch
+                ON ch.cus_kode = h.pen_cus_kode
+            LEFT JOIN tcustomer cm
+                ON cm.cus_kode = m.mspk_cus_kode
             LEFT JOIN tkesesuaianmap k
                 ON TRIM(COALESCE(k.mspk_nomor, '')) = TRIM(COALESCE(m.mspk_nomor, ''))
             LEFT JOIN tsj_dtl_memo sd
@@ -92,7 +96,17 @@ const getTrackingMapList = async (req, res) => {
               AND m.mspk_tanggal <= ?
               ${ownerFilterSql}
               ${searchSql}
-            GROUP BY m.mspk_nomor, c.cus_nama, c.cus_alamat, m.mspk_tanggal
+            GROUP BY
+                m.mspk_nomor,
+                m.mspk_tanggal,
+                h.pen_cus_kode,
+                ch.cus_kode,
+                ch.cus_nama,
+                ch.cus_alamat,
+                m.mspk_cus_kode,
+                cm.cus_kode,
+                cm.cus_nama,
+                cm.cus_alamat
             ORDER BY m.mspk_tanggal DESC, m.mspk_nomor DESC
             `,
             params,
