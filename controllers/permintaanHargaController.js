@@ -1064,6 +1064,14 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
             });
         }
 
+        const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
+        if (buffer.length > MAX_FILE_SIZE) {
+            return res.status(400).json({
+                success: false,
+                message: `Ukuran gambar melebihi batas maksimal 1MB (ukuran file: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB)`,
+            });
+        }
+
         const safeNomor = String(nomor || "")
             .trim()
             .replace(/[^A-Z0-9.\-_/]/gi, "_");

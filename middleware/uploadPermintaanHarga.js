@@ -13,11 +13,6 @@ console.log("[UploadPermintaanHarga][Init]", {
     isUncPath: /^\\\\[^\\]+\\[^\\]+/i.test(UPLOAD_DIR),
 });
 
-// const isUncPath = /^\\\\[^\\]+\\[^\\]+/i.test(UPLOAD_DIR);
-// if (!isUncPath && !fs.existsSync(UPLOAD_DIR)) {
-//     fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-// }
-
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         fs.access(UPLOAD_DIR, fs.constants.W_OK, (err) => {
@@ -65,7 +60,7 @@ const uploadPermintaanHarga = multer({
         return cb(null, true);
     },
     limits: {
-        fileSize: 5 * 1024 * 1024,
+        fileSize: 1 * 1024 * 1024, // 1MB
     },
 });
 
