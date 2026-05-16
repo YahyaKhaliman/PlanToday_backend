@@ -2,15 +2,21 @@ const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
 
-// TEMP TEST: arahkan upload langsung ke SMB share (default), bisa dioverride via env.
-const DEFAULT_SMB_UPLOAD_DIR = "\\\\103.94.238.252\\image\\mintaharga";
+// Path lokal ke folder gambar — folder ini yang di-share via SMB ke Delphi
+// (\\103.94.238.252\image\mintaharga adalah share dari folder lokal ini).
+// Bisa di-override via env IMAGE_UPLOAD_DIR jika lokasi berbeda.
+const DEFAULT_UPLOAD_DIR = path.join(process.cwd(), "image", "mintaharga");
 const UPLOAD_DIR = String(
-    process.env.IMAGE_UPLOAD_DIR || DEFAULT_SMB_UPLOAD_DIR,
+    process.env.IMAGE_UPLOAD_DIR || DEFAULT_UPLOAD_DIR,
 ).trim();
+
+// Buat direktori jika belum ada
+if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
 
 console.log("[UploadPermintaanHarga][Init]", {
     uploadDir: UPLOAD_DIR,
-    isUncPath: /^\\\\[^\\]+\\[^\\]+/i.test(UPLOAD_DIR),
 });
 
 const storage = multer.diskStorage({
