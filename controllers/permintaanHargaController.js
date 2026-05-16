@@ -1054,7 +1054,8 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
         }
 
         const mimeType = String(matched[1] || "image/jpeg").toLowerCase();
-        const ext = mimeType.includes("png") ? "png" : "jpg";
+        // Force ekstensi menjadi .jpg agar sesuai dengan format yang dibaca oleh view Delphi
+        const ext = "jpg";
         const b64 = String(matched[3] || "");
         const buffer = Buffer.from(b64, "base64");
         if (!buffer.length) {

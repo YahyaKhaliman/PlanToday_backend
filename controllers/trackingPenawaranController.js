@@ -53,6 +53,8 @@ const getTrackingPenawaranList = async (req, res) => {
             normalizeDate(req.query.startDate) || monthRange.start;
         const endDate = normalizeDate(req.query.endDate) || monthRange.end;
         const search = String(req.query.search || "").trim();
+        const sales = String(req.query.sales || "").trim();
+        const customer = String(req.query.customer || "").trim();
         const limit = Math.min(
             Math.max(Number(req.query.limit) || 100, 1),
             300,
@@ -66,13 +68,21 @@ const getTrackingPenawaranList = async (req, res) => {
 
         if (search) {
             const like = `%${search}%`;
-            searchSql = `
+            searchSql += `
               AND (
                   h.pen_nomor LIKE ?
                   OR COALESCE(m.mspk_nomor, '') LIKE ?
                   OR COALESCE(m.mspk_keterangan, '') LIKE ?
               )`;
             params.push(like, like, like);
+        }
+        if (sales) {
+            searchSql += ` AND COALESCE(s.sal_nama, '') LIKE ? `;
+            params.push(`%${sales}%`);
+        }
+        if (customer) {
+            searchSql += ` AND COALESCE(c.cus_nama, '') LIKE ? `;
+            params.push(`%${customer}%`);
         }
 
         params.push(limit);
@@ -87,6 +97,7 @@ const getTrackingPenawaranList = async (req, res) => {
                 h.pen_nomor AS no_penawaran,
                 DATE_FORMAT(h.pen_tanggal, '%Y-%m-%d') AS tanggal_penawaran,
                 COALESCE(c.cus_nama, '') AS customer,
+                COALESCE(s.sal_nama, '') AS sales,
                 COUNT(DISTINCT d.pend_id) AS total_item,
                 COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' THEN d.pend_id END) AS total_item_map,
                 GROUP_CONCAT(DISTINCT NULLIF(COALESCE(m.mspk_nomor, ''), '') ORDER BY m.mspk_nomor SEPARATOR ', ') AS no_map,
@@ -98,6 +109,8 @@ const getTrackingPenawaranList = async (req, res) => {
             FROM tpenawaran_hdr h
             INNER JOIN tpenawaran_dtl d
                 ON d.pend_pen_nomor = h.pen_nomor
+            LEFT JOIN tsales s
+                ON s.sal_kode = h.pen_sal_kode
             LEFT JOIN tcustomer c
                 ON c.cus_kode = h.pen_cus_kode
             LEFT JOIN tmemospk m
@@ -106,12 +119,33 @@ const getTrackingPenawaranList = async (req, res) => {
             WHERE ${ownerFilterSql}h.pen_tanggal >= ?
               AND h.pen_tanggal <= ?
               ${searchSql}
-            GROUP BY h.pen_nomor, h.pen_tanggal
+            GROUP BY h.pen_nomor, h.pen_tanggal, c.cus_nama, s.sal_nama
             ORDER BY h.pen_tanggal DESC, h.pen_nomor DESC
             LIMIT ?
             `,
             params,
         );
+
+        const baseParams = [startDate, endDate];
+        if (!managerRole) {
+            baseParams.unshift(authSalesKode);
+        }
+
+        const [filterRows] = await db.query(
+            `
+            SELECT 
+                COALESCE(s.sal_nama, '') AS sales,
+                COALESCE(c.cus_nama, '') AS customer
+            FROM tpenawaran_hdr h
+            LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
+            LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
+            WHERE ${ownerFilterSql}h.pen_tanggal >= ? AND h.pen_tanggal <= ?
+            `,
+            baseParams
+        );
+
+        const availableSales = Array.from(new Set(filterRows.map(r => r.sales).filter(Boolean))).sort();
+        const availableCustomers = Array.from(new Set(filterRows.map(r => r.customer).filter(Boolean))).sort();
 
         return res.json({
             success: true,
@@ -121,6 +155,10 @@ const getTrackingPenawaranList = async (req, res) => {
                 endDate,
                 search,
                 count: rows?.length || 0,
+                filter_options: {
+                    sales: availableSales,
+                    customers: availableCustomers
+                }
             },
         });
     } catch (err) {
