@@ -611,7 +611,7 @@ const updatePermintaanHarga = async (req, res) => {
         });
 
         const [rows] = await db.query(
-            `SELECT mh_nomor, mh_status, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
+            `SELECT mh_nomor, mh_status, mh_sal_kode, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
             [nomor],
         );
         if (!rows?.length) {
@@ -807,7 +807,7 @@ const deletePermintaanHarga = async (req, res) => {
         const nomor = String(req.params.nomor || "").trim();
         const actor = resolveActor(req);
         const [rows] = await db.query(
-            `SELECT mh_nomor, mh_status, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
+            `SELECT mh_nomor, mh_status, mh_sal_kode, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
             [nomor],
         );
         if (!rows?.length) {
@@ -862,7 +862,7 @@ const uploadPermintaanHargaImage = async (req, res) => {
         }
 
         const [rows] = await db.query(
-            `SELECT mh_nomor, mh_status, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
+            `SELECT mh_nomor, mh_status, mh_sal_kode, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
             [nomor],
         );
         if (!rows?.length) {
@@ -1018,7 +1018,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
         }
 
         const [rows] = await db.query(
-            `SELECT mh_nomor, mh_status, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
+            `SELECT mh_nomor, mh_status, mh_sal_kode, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
             [nomor],
         );
         if (!rows?.length) {
