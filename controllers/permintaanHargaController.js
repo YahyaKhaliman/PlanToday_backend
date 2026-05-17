@@ -933,6 +933,7 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
         const slot = String(req.params.slot || "1").trim();
 
         if (!nomor) {
+            console.warn("[PermintaanHarga][Upload][Internal][FAILED] Nomor wajib diisi");
             return res.status(400).json({
                 success: false,
                 message: "Nomor wajib diisi",
@@ -940,6 +941,7 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
         }
 
         if (!["1", "2"].includes(slot)) {
+            console.warn("[PermintaanHarga][Upload][Internal][FAILED] Slot gambar invalid", { nomor, slot });
             return res.status(400).json({
                 success: false,
                 message: "Slot gambar hanya 1 atau 2",
@@ -947,6 +949,7 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
         }
 
         if (!req.file) {
+            console.warn("[PermintaanHarga][Upload][Internal][FAILED] File gambar tidak terdeteksi", { nomor, slot });
             return res.status(400).json({
                 success: false,
                 message: "File gambar wajib diunggah",
@@ -961,7 +964,7 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
             String(slot) === "2" ? imagePaths.legacy2 : imagePaths.legacy1;
         const withBase = (p) => (baseUrl ? `${baseUrl}${p}` : p);
 
-        console.log("[PermintaanHarga][Upload][Internal][Result]", {
+        console.log("[PermintaanHarga][Upload][Internal][SUCCESS]", {
             nomor,
             slot,
             savedFile: req.file?.filename,
@@ -988,6 +991,12 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
             },
         });
     } catch (err) {
+        console.error("[PermintaanHarga][Upload][Internal][ERROR] Gagal menyimpan file:", {
+            nomor: req.params.nomor,
+            slot: req.params.slot,
+            error: err.message,
+            stack: err.stack,
+        });
         return res.status(500).json({
             success: false,
             message:
@@ -1037,6 +1046,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
 
         const dataUrl = String(req.body?.file_base64 || "").trim();
         if (!dataUrl) {
+            console.warn("[PermintaanHarga][Upload][Base64][FAILED] Payload file_base64 kosong", { nomor, slot });
             return res.status(400).json({
                 success: false,
                 message: "Payload file_base64 wajib diisi",
@@ -1047,6 +1057,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
             /^data:(image\/(jpeg|jpg|png));base64,(.+)$/i,
         );
         if (!matched) {
+            console.warn("[PermintaanHarga][Upload][Base64][FAILED] Format base64 tidak valid", { nomor, slot });
             return res.status(400).json({
                 success: false,
                 message: "Format base64 tidak valid",
@@ -1059,6 +1070,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
         const b64 = String(matched[3] || "");
         const buffer = Buffer.from(b64, "base64");
         if (!buffer.length) {
+            console.warn("[PermintaanHarga][Upload][Base64][FAILED] Konten gambar kosong", { nomor, slot });
             return res.status(400).json({
                 success: false,
                 message: "Konten gambar kosong",
@@ -1067,6 +1079,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
 
         const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
         if (buffer.length > MAX_FILE_SIZE) {
+            console.warn("[PermintaanHarga][Upload][Base64][FAILED] File terlalu besar", { nomor, slot, bytes: buffer.length });
             return res.status(400).json({
                 success: false,
                 message: `Ukuran gambar melebihi batas maksimal 1MB (ukuran file: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB)`,
@@ -1090,7 +1103,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
             String(slot) === "2" ? imagePaths.legacy2 : imagePaths.legacy1;
         const withBase = (p) => (baseUrl ? `${baseUrl}${p}` : p);
 
-        console.log("[PermintaanHarga][Upload][Base64][Result]", {
+        console.log("[PermintaanHarga][Upload][Base64][SUCCESS]", {
             nomor,
             slot,
             mimeType,
@@ -1113,6 +1126,12 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
             },
         });
     } catch (err) {
+        console.error("[PermintaanHarga][Upload][Base64][ERROR] Gagal menyimpan file:", {
+            nomor: req.params.nomor,
+            slot: req.params.slot,
+            error: err.message,
+            stack: err.stack,
+        });
         return res.status(500).json({
             success: false,
             message:
