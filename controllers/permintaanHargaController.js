@@ -366,7 +366,7 @@ const getPermintaanHargaList = async (req, res) => {
             `
             SELECT
                 m.mh_nomor AS nomor,
-                DATE_FORMAT(m.mh_tanggal, '%Y-%m-%d') AS tanggal,
+                m.date_create AS tanggal,
                 COALESCE(m.mh_nama,'') AS nama,
                 COALESCE(m.mh_cus_nama,'') AS customer,
                 COALESCE(v.divisi,'') AS divisi,
