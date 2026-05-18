@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const db = require("../config/dbPenawaran");
 const { UPLOAD_DIR } = require("../middleware/uploadPermintaanHarga");
+const sharp = require("sharp");
 
 const nomorLocks = new Map();
 
@@ -888,6 +889,17 @@ const uploadPermintaanHargaImage = async (req, res) => {
             });
         }
 
+        if (req.file && req.file.path) {
+            try {
+                const imgBuffer = await sharp(req.file.path)
+                    .jpeg({ quality: 90, force: true })
+                    .toBuffer();
+                await fs.promises.writeFile(req.file.path, imgBuffer);
+            } catch (sharpErr) {
+                console.error("[PermintaanHarga][Upload][SharpError]", sharpErr);
+            }
+        }
+
         const baseUrl = buildImageBaseUrl();
         const imagePaths = buildImagePaths(nomor);
         const currentPath =
@@ -954,6 +966,17 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
                 success: false,
                 message: "File gambar wajib diunggah",
             });
+        }
+
+        if (req.file && req.file.path) {
+            try {
+                const imgBuffer = await sharp(req.file.path)
+                    .jpeg({ quality: 90, force: true })
+                    .toBuffer();
+                await fs.promises.writeFile(req.file.path, imgBuffer);
+            } catch (sharpErr) {
+                console.error("[PermintaanHarga][Upload][Internal][SharpError]", sharpErr);
+            }
         }
 
         const baseUrl = buildImageBaseUrl();
@@ -1068,7 +1091,7 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
         // Force ekstensi menjadi .jpg agar sesuai dengan format yang dibaca oleh view Delphi
         const ext = "jpg";
         const b64 = String(matched[3] || "");
-        const buffer = Buffer.from(b64, "base64");
+        let buffer = Buffer.from(b64, "base64");
         if (!buffer.length) {
             console.warn("[PermintaanHarga][Upload][Base64][FAILED] Konten gambar kosong", { nomor, slot });
             return res.status(400).json({
@@ -1084,6 +1107,12 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
                 success: false,
                 message: `Ukuran gambar melebihi batas maksimal 1MB (ukuran file: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB)`,
             });
+        }
+
+        try {
+            buffer = await sharp(buffer).jpeg({ quality: 90, force: true }).toBuffer();
+        } catch (sharpErr) {
+            console.error("[PermintaanHarga][Upload][Base64][SharpError]", sharpErr);
         }
 
         const safeNomor = String(nomor || "")
