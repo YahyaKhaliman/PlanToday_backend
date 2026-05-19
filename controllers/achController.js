@@ -205,7 +205,7 @@ const getOmsetByMonth = async (req, res) => {
 
         const [nameRows] = await db.query(
             `SELECT MAX(nama) AS nama
-        FROM kpi.v_mkt_omset
+        FROM ${process.env.DB_NAME_ACH}.v_mkt_omset
         WHERE kode = ?`,
             [kode],
         );
@@ -236,7 +236,7 @@ const getOmsetByMonth = async (req, res) => {
             CAST(ROUND(SUM(target), 0) AS UNSIGNED)      AS target,
             CAST(ROUND(SUM(realisasi), 0) AS UNSIGNED)   AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi.v_mkt_omset
+        FROM ${process.env.DB_NAME_ACH}.v_mkt_omset
         ${where}
         GROUP BY tahun, bulan
         ORDER BY tahun, bulan
@@ -272,7 +272,7 @@ const getOmsetByYear = async (req, res) => {
 
         const [nameRows] = await db.query(
             `SELECT MAX(nama) AS nama
-        FROM kpi.v_mkt_omset
+        FROM ${process.env.DB_NAME_ACH}.v_mkt_omset
         WHERE kode = ?`,
             [kode],
         );
@@ -284,7 +284,7 @@ const getOmsetByYear = async (req, res) => {
             SUM(target) AS target,
             SUM(realisasi) AS realisasi,
             ROUND((SUM(realisasi) / NULLIF(SUM(target), 0)) * 100, 2) AS ach
-        FROM kpi.v_mkt_omset
+        FROM ${process.env.DB_NAME_ACH}.v_mkt_omset
         WHERE kode = ?
         GROUP BY tahun
         ORDER BY tahun;
@@ -463,7 +463,7 @@ const getSpkOmsetByMonth = async (req, res) => {
             spk_jumlah,
             spk_harga,
             (IFNULL(spk_jumlah,0) * IFNULL(spk_harga,0)) AS nilai
-        FROM kencanaprint_lokal.tspk
+        FROM ${process.env.DB_NAME_PENAWARAN}.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
             AND spk_sal_kode = ?
@@ -481,7 +481,7 @@ const getSpkOmsetByMonth = async (req, res) => {
                 THEN IFNULL(spk_jumlah,0)*IFNULL(spk_harga,0) ELSE 0 END) AS garmen_premium,
             SUM(CASE WHEN spk_divisi=5
                 THEN IFNULL(spk_jumlah,0)*IFNULL(spk_harga,0) ELSE 0 END) AS digital_print
-        FROM kencanaprint_lokal.tspk
+        FROM ${process.env.DB_NAME_PENAWARAN}.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
             AND spk_sal_kode = ?
