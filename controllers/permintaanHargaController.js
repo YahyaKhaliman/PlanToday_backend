@@ -168,6 +168,15 @@ const buildImagePaths = (nomor) => {
     };
 };
 
+const getExistingImageMeta = (nomor, slot) => {
+    const safeNomor = String(nomor || "").trim();
+    if (!safeNomor) return null;
+    const fileName = slot === 2 ? `${safeNomor}-2.jpg` : `${safeNomor}.jpg`;
+    const absolutePath = path.join(UPLOAD_DIR, fileName);
+    if (!fs.existsSync(absolutePath)) return null;
+    return { fileName, absolutePath };
+};
+
 const getYearFromTanggal = (tanggal) =>
     Number(String(tanggal || "").slice(0, 4));
 
@@ -460,7 +469,9 @@ const getPermintaanHargaDetail = async (req, res) => {
                 h.mh_sal_kode,
                 h.mh_nama,
                 h.mh_jmlorder,
-                h.mh_dateorder,
+                h.mh_harga,
+                h.mh_budget,
+                DATE_FORMAT(h.mh_dateorder, '%Y-%m-%d') AS mh_dateorder,
                 h.mh_kain,
                 h.mh_panjang,
                 h.mh_lebar,
@@ -501,14 +512,17 @@ const getPermintaanHargaDetail = async (req, res) => {
             imagePath2: imagePaths.delphi2,
         });
 
-        // Backward-compatible: tetap kirim URL publik + path/filename agar FE edit
-        // bisa membedakan gambar existing (server) vs gambar baru (local uri).
-        row.gambar_1_url = withBase(imagePaths.delphi1);
-        row.gambar_2_url = withBase(imagePaths.delphi2);
-        row.gambar_1_path = imagePaths.delphi1;
-        row.gambar_2_path = imagePaths.delphi2;
-        row.gambar_1_file = `${row.mh_nomor}.jpg`;
-        row.gambar_2_file = `${row.mh_nomor}-2.jpg`;
+        // Kirim metadata gambar hanya jika file benar-benar ada.
+        // Ini mencegah FE menganggap gambar "sudah terisi" padahal file belum ada.
+        const existing1 = getExistingImageMeta(row.mh_nomor, 1);
+        const existing2 = getExistingImageMeta(row.mh_nomor, 2);
+
+        row.gambar_1_url = existing1 ? withBase(imagePaths.delphi1) : "";
+        row.gambar_2_url = existing2 ? withBase(imagePaths.delphi2) : "";
+        row.gambar_1_path = existing1 ? imagePaths.delphi1 : "";
+        row.gambar_2_path = existing2 ? imagePaths.delphi2 : "";
+        row.gambar_1_file = existing1 ? existing1.fileName : "";
+        row.gambar_2_file = existing2 ? existing2.fileName : "";
 
         return res.json({ success: true, data: row });
     } catch (err) {
@@ -896,7 +910,10 @@ const uploadPermintaanHargaImage = async (req, res) => {
                     .toBuffer();
                 await fs.promises.writeFile(req.file.path, imgBuffer);
             } catch (sharpErr) {
-                console.error("[PermintaanHarga][Upload][SharpError]", sharpErr);
+                console.error(
+                    "[PermintaanHarga][Upload][SharpError]",
+                    sharpErr,
+                );
             }
         }
 
@@ -945,7 +962,9 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
         const slot = String(req.params.slot || "1").trim();
 
         if (!nomor) {
-            console.warn("[PermintaanHarga][Upload][Internal][FAILED] Nomor wajib diisi");
+            console.warn(
+                "[PermintaanHarga][Upload][Internal][FAILED] Nomor wajib diisi",
+            );
             return res.status(400).json({
                 success: false,
                 message: "Nomor wajib diisi",
@@ -953,7 +972,10 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
         }
 
         if (!["1", "2"].includes(slot)) {
-            console.warn("[PermintaanHarga][Upload][Internal][FAILED] Slot gambar invalid", { nomor, slot });
+            console.warn(
+                "[PermintaanHarga][Upload][Internal][FAILED] Slot gambar invalid",
+                { nomor, slot },
+            );
             return res.status(400).json({
                 success: false,
                 message: "Slot gambar hanya 1 atau 2",
@@ -961,7 +983,10 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
         }
 
         if (!req.file) {
-            console.warn("[PermintaanHarga][Upload][Internal][FAILED] File gambar tidak terdeteksi", { nomor, slot });
+            console.warn(
+                "[PermintaanHarga][Upload][Internal][FAILED] File gambar tidak terdeteksi",
+                { nomor, slot },
+            );
             return res.status(400).json({
                 success: false,
                 message: "File gambar wajib diunggah",
@@ -975,7 +1000,10 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
                     .toBuffer();
                 await fs.promises.writeFile(req.file.path, imgBuffer);
             } catch (sharpErr) {
-                console.error("[PermintaanHarga][Upload][Internal][SharpError]", sharpErr);
+                console.error(
+                    "[PermintaanHarga][Upload][Internal][SharpError]",
+                    sharpErr,
+                );
             }
         }
 
@@ -1014,12 +1042,15 @@ const uploadPermintaanHargaImageInternal = async (req, res) => {
             },
         });
     } catch (err) {
-        console.error("[PermintaanHarga][Upload][Internal][ERROR] Gagal menyimpan file:", {
-            nomor: req.params.nomor,
-            slot: req.params.slot,
-            error: err.message,
-            stack: err.stack,
-        });
+        console.error(
+            "[PermintaanHarga][Upload][Internal][ERROR] Gagal menyimpan file:",
+            {
+                nomor: req.params.nomor,
+                slot: req.params.slot,
+                error: err.message,
+                stack: err.stack,
+            },
+        );
         return res.status(500).json({
             success: false,
             message:
@@ -1069,7 +1100,10 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
 
         const dataUrl = String(req.body?.file_base64 || "").trim();
         if (!dataUrl) {
-            console.warn("[PermintaanHarga][Upload][Base64][FAILED] Payload file_base64 kosong", { nomor, slot });
+            console.warn(
+                "[PermintaanHarga][Upload][Base64][FAILED] Payload file_base64 kosong",
+                { nomor, slot },
+            );
             return res.status(400).json({
                 success: false,
                 message: "Payload file_base64 wajib diisi",
@@ -1080,7 +1114,10 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
             /^data:(image\/(jpeg|jpg|png));base64,(.+)$/i,
         );
         if (!matched) {
-            console.warn("[PermintaanHarga][Upload][Base64][FAILED] Format base64 tidak valid", { nomor, slot });
+            console.warn(
+                "[PermintaanHarga][Upload][Base64][FAILED] Format base64 tidak valid",
+                { nomor, slot },
+            );
             return res.status(400).json({
                 success: false,
                 message: "Format base64 tidak valid",
@@ -1093,7 +1130,10 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
         const b64 = String(matched[3] || "");
         let buffer = Buffer.from(b64, "base64");
         if (!buffer.length) {
-            console.warn("[PermintaanHarga][Upload][Base64][FAILED] Konten gambar kosong", { nomor, slot });
+            console.warn(
+                "[PermintaanHarga][Upload][Base64][FAILED] Konten gambar kosong",
+                { nomor, slot },
+            );
             return res.status(400).json({
                 success: false,
                 message: "Konten gambar kosong",
@@ -1102,7 +1142,10 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
 
         const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
         if (buffer.length > MAX_FILE_SIZE) {
-            console.warn("[PermintaanHarga][Upload][Base64][FAILED] File terlalu besar", { nomor, slot, bytes: buffer.length });
+            console.warn(
+                "[PermintaanHarga][Upload][Base64][FAILED] File terlalu besar",
+                { nomor, slot, bytes: buffer.length },
+            );
             return res.status(400).json({
                 success: false,
                 message: `Ukuran gambar melebihi batas maksimal 1MB (ukuran file: ${(buffer.length / (1024 * 1024)).toFixed(2)} MB)`,
@@ -1110,9 +1153,14 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
         }
 
         try {
-            buffer = await sharp(buffer).jpeg({ quality: 90, force: true }).toBuffer();
+            buffer = await sharp(buffer)
+                .jpeg({ quality: 90, force: true })
+                .toBuffer();
         } catch (sharpErr) {
-            console.error("[PermintaanHarga][Upload][Base64][SharpError]", sharpErr);
+            console.error(
+                "[PermintaanHarga][Upload][Base64][SharpError]",
+                sharpErr,
+            );
         }
 
         const safeNomor = String(nomor || "")
@@ -1155,12 +1203,15 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
             },
         });
     } catch (err) {
-        console.error("[PermintaanHarga][Upload][Base64][ERROR] Gagal menyimpan file:", {
-            nomor: req.params.nomor,
-            slot: req.params.slot,
-            error: err.message,
-            stack: err.stack,
-        });
+        console.error(
+            "[PermintaanHarga][Upload][Base64][ERROR] Gagal menyimpan file:",
+            {
+                nomor: req.params.nomor,
+                slot: req.params.slot,
+                error: err.message,
+                stack: err.stack,
+            },
+        );
         return res.status(500).json({
             success: false,
             message:
@@ -1324,6 +1375,69 @@ const createPermintaanHargaCustomer = async (req, res) => {
     }
 };
 
+const deletePermintaanHargaImage = async (req, res) => {
+    try {
+        const nomor = String(req.params.nomor || "").trim();
+        const slot = String(req.params.slot || "1").trim();
+        if (!["1", "2"].includes(slot)) {
+            return res.status(400).json({
+                success: false,
+                message: "Slot gambar hanya 1 atau 2",
+            });
+        }
+
+        const [rows] = await db.query(
+            `SELECT mh_nomor, mh_status, mh_sal_kode, user_create FROM tmintaharga WHERE mh_nomor = ? LIMIT 1`,
+            [nomor],
+        );
+        if (!rows?.length) {
+            return res
+                .status(404)
+                .json({ success: false, message: "Data tidak ditemukan" });
+        }
+        if (isSalesUser(req) && !isOwnedBySalesKode(req, rows[0])) {
+            return res.status(403).json({
+                success: false,
+                message: "Tidak berhak menghapus gambar data ini",
+            });
+        }
+        if (
+            String(rows[0].mh_status || "")
+                .trim()
+                .toUpperCase() !== "BELUM"
+        ) {
+            return res.status(409).json({
+                success: false,
+                message: "Hapus gambar hanya diizinkan untuk status BELUM",
+            });
+        }
+
+        const fileName = slot === "2" ? `${nomor}-2.jpg` : `${nomor}.jpg`;
+        const targetPath = path.join(UPLOAD_DIR, fileName);
+
+        if (fs.existsSync(targetPath)) {
+            await fs.promises.unlink(targetPath);
+            console.log("[PermintaanHarga][DeleteImage][Success]", { nomor, slot, targetPath });
+            return res.json({
+                success: true,
+                message: "Gambar berhasil dihapus dari server",
+            });
+        } else {
+            console.warn("[PermintaanHarga][DeleteImage][NotFound]", { nomor, slot, targetPath });
+            return res.json({
+                success: true,
+                message: "File gambar tidak ditemukan di server, namun data telah di-sinkronisasi",
+            });
+        }
+    } catch (err) {
+        console.error("[PermintaanHarga][DeleteImage][Error]", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message || "Gagal menghapus gambar dari server",
+        });
+    }
+};
+
 module.exports = {
     getPermintaanHargaList,
     getPermintaanHargaDetail,
@@ -1335,4 +1449,5 @@ module.exports = {
     uploadPermintaanHargaImage,
     uploadPermintaanHargaImageInternal,
     uploadPermintaanHargaImageBase64,
+    deletePermintaanHargaImage,
 };

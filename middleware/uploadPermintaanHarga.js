@@ -6,17 +6,30 @@ const multer = require("multer");
 // (\\103.94.238.252\image\mintaharga adalah share dari folder lokal ini).
 // Bisa di-override via env IMAGE_UPLOAD_DIR jika lokasi berbeda.
 const DEFAULT_UPLOAD_DIR = path.join(process.cwd(), "image", "mintaharga");
-const UPLOAD_DIR = String(
+let UPLOAD_DIR = String(
     process.env.IMAGE_UPLOAD_DIR || DEFAULT_UPLOAD_DIR,
 ).trim();
 
+// Auto-convert Linux /mnt/ path to Windows UNC path if running on Windows
+if (process.platform === "win32" && UPLOAD_DIR.startsWith("/mnt/")) {
+    UPLOAD_DIR = UPLOAD_DIR.replace(/^\/mnt\//, "\\\\103.94.238.252\\").replace(/\//g, "\\");
+}
+
 // Buat direktori jika belum ada
 if (!fs.existsSync(UPLOAD_DIR)) {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    try {
+        fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    } catch (mkdirErr) {
+        console.error("[UploadPermintaanHarga][Init] Gagal membuat UPLOAD_DIR:", {
+            uploadDir: UPLOAD_DIR,
+            message: mkdirErr.message,
+        });
+    }
 }
 
 console.log("[UploadPermintaanHarga][Init]", {
-    uploadDir: UPLOAD_DIR,
+    rawUploadDir: process.env.IMAGE_UPLOAD_DIR,
+    resolvedUploadDir: UPLOAD_DIR,
 });
 
 const storage = multer.diskStorage({

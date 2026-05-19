@@ -94,4 +94,10 @@ router.post(
     controller.uploadPermintaanHargaImageBase64,
 );
 
+router.delete(
+    "/permintaan-harga/:nomor/gambar/:slot",
+    auth,
+    controller.deletePermintaanHargaImage,
+);
+
 module.exports = router;
