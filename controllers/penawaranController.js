@@ -1689,7 +1689,6 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
 
         const params = [
             effectiveSalesKode,
-            ...PERMINTAAN_STATUS_SELESAI_VALUES,
         ];
         let customerSql = "";
         if (referenceCustomerKode) {
@@ -1736,7 +1735,6 @@ const getMasterPermintaanHargaForPenawaran = async (req, res) => {
                 FROM tmintaharga m
                 LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
                 WHERE COALESCE(m.mh_sal_kode, '') = ?
-                  AND UPPER(TRIM(COALESCE(m.mh_status, ''))) IN (?, ?)
                   ${customerSql}
                   AND NOT EXISTS (
                       SELECT 1
