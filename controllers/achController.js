@@ -114,6 +114,8 @@ const getAchievementRange = async (req, res) => {
             END AS ach
         FROM kpi.v_mkt_omset v
         WHERE
+            v.jabatan != 'MO'
+            AND
             (v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?))
             AND
             (v.tahun < ? OR (v.tahun = ? AND v.bulan <= ?))

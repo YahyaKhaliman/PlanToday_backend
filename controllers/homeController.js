@@ -5,6 +5,11 @@ function safe(v, fallback = "-") {
     const s = String(v).trim();
     return s.length ? s : fallback;
 }
+function getWIBDateTime() {
+    const d = new Date();
+    const utc = d.getTime() + (d.getTimezoneOffset() * 60 * 1000);
+    return new Date(utc + (3600000 * 7));
+}
 function formatTanggalID(date) {
     return new Date(date).toLocaleDateString("id-ID", {
         day: "2-digit",
@@ -39,33 +44,35 @@ const calonCustomer = async (req, res) => {
     try {
         await conn.beginTransaction();
 
-        // ambil cc_id terakhir
-        const [[{ lastId }]] = await conn.query(
-            "SELECT IFNULL(MAX(cc_id), 0) AS lastId FROM tcaloncustomer",
+        // ambil cc_kode (5-digit numeric) baru dari kencanaprint.tcustomer
+        const [[{ max_kode }]] = await conn.query(
+            `SELECT IFNULL(MAX(CAST(cus_kode AS UNSIGNED)), 0) AS max_kode
+             FROM kencanaprint.tcustomer
+             WHERE TRIM(IFNULL(cus_kode, '')) REGEXP '^[0-9]{1,5}$'`,
         );
 
-        let nextId = lastId + 1;
+        let nextKodeNum = Number(max_kode || 0) + 1;
         let ccKode = "";
 
         // memastikan cc_kode tidak bentrok
         while (true) {
-            ccKode = `CC-${String(nextId).padStart(4, "0")}`;
+            ccKode = String(nextKodeNum).padStart(5, "0");
 
             const [cek] = await conn.query(
-                "SELECT 1 FROM tcaloncustomer WHERE cc_kode = ?",
+                "SELECT 1 FROM kencanaprint.tcustomer WHERE cus_kode = ?",
                 [ccKode],
             );
 
             if (cek.length === 0) break;
-            nextId++;
+            nextKodeNum++;
         }
 
-        // Insert data
+        // Insert data ke kencanaprint.tcustomer
         await conn.query(
-            `INSERT INTO tcaloncustomer
-        (cc_id, cc_kode, cc_nama, cc_alamat, cc_kota, cc_telp, cc_cp)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [nextId, ccKode, nama, alamat, cabang, telp, pic],
+            `INSERT INTO kencanaprint.tcustomer
+             (cus_kode, cus_nama, cus_alamat, cus_kota, cus_telp, cus_cp, cus_aktif, user_create, date_create)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?, NOW())`,
+            [ccKode, nama, alamat || "", cabang || "", telp || "", pic || "", "PlanToday"],
         );
 
         await conn.commit();
@@ -74,7 +81,7 @@ const calonCustomer = async (req, res) => {
             success: true,
             message: "Calon customer berhasil disimpan",
             data: {
-                cc_id: nextId,
+                cc_id: nextKodeNum,
                 cc_kode: ccKode,
             },
         });
@@ -113,7 +120,7 @@ const updateCalonCustomerByKode = async (req, res) => {
 
     try {
         const [exist] = await db.query(
-            `SELECT cc_kode FROM tcaloncustomer WHERE cc_kode = ? LIMIT 1`,
+            `SELECT cus_kode FROM kencanaprint.tcustomer WHERE cus_kode = ? LIMIT 1`,
             [cc_kode],
         );
 
@@ -124,14 +131,14 @@ const updateCalonCustomerByKode = async (req, res) => {
         }
 
         const sql = `
-        UPDATE tcaloncustomer
+        UPDATE kencanaprint.tcustomer
         SET
-            cc_nama = ?,
-            cc_kota = ?,
-            cc_alamat = ?,
-            cc_cp = ?,
-            cc_telp = ?
-        WHERE cc_kode = ?
+            cus_nama = ?,
+            cus_kota = ?,
+            cus_alamat = ?,
+            cus_cp = ?,
+            cus_telp = ?
+        WHERE cus_kode = ?
         LIMIT 1
         `;
 
@@ -147,9 +154,9 @@ const updateCalonCustomerByKode = async (req, res) => {
         const [result] = await db.query(sql, params);
 
         const [rows] = await db.query(
-            `SELECT cc_kode, cc_nama, cc_alamat, cc_kota, cc_cp, cc_telp
-        FROM tcaloncustomer
-        WHERE cc_kode = ? LIMIT 1`,
+            `SELECT cus_kode AS cc_kode, cus_nama AS cc_nama, cus_alamat AS cc_alamat, cus_kota AS cc_kota, cus_cp AS cc_cp, cus_telp AS cc_telp
+             FROM kencanaprint.tcustomer
+             WHERE cus_kode = ? LIMIT 1`,
             [cc_kode],
         );
 
@@ -167,7 +174,7 @@ const updateCalonCustomerByKode = async (req, res) => {
             data: rows?.[0] || null,
         });
     } catch (err) {
-        console.error("UPDATE CALON CUSTOMER ERROR:", err);
+        console.error("UPDATE CUSTOMER ERROR:", err);
         return res
             .status(500)
             .json({ success: false, message: err.sqlMessage || err.message });
@@ -215,47 +222,20 @@ const cariCustomer = async (req, res) => {
         const like = `%${search}%`;
         const [rows] = await db.query(
             `
-    SELECT
-        x.id,
-        x.cc_kode,
-        x.cc_nama,
-        x.cc_alamat,
-        x.cc_cp,
-        x.cc_telp,
-        x.cc_kota,
-        x.sumber
-    FROM (
-        -- 1) Calon customer
-        SELECT
-        CONCAT('CALON-', cc_id)                AS id,
-        cc_kode                               AS cc_kode,
-        cc_nama                               AS cc_nama,
-        cc_alamat                             AS cc_alamat,
-        cc_cp                                 AS cc_cp,
-        cc_telp                               AS cc_telp,
-        cc_kota                               AS cc_kota,
-        'CALONCUSTOMER'                       AS sumber
-        FROM tcaloncustomer
-        WHERE cc_nama LIKE ?
-
-        UNION ALL
-
-        -- 2) Customer aktif
-        SELECT
-        CONCAT('CUSTOMER-', NULLIF(cus_kode, '')) AS id,
-        cus_kode                                   AS cc_kode,
-        cus_nama                                   AS cc_nama,
-        cus_alamat                                 AS cc_alamat,
-        cus_cp                                     AS cc_cp,
-        cus_telp                                   AS cc_telp,
-        cus_kota                                   AS cc_kota,
-        'CUSTOMER'                                 AS sumber
-        FROM tcustomer
-        WHERE cus_nama LIKE ?
-    ) x
-    ORDER BY x.cc_nama ASC
-    LIMIT 50
-    `,
+            SELECT
+                CONCAT('CUSTOMER-', NULLIF(cus_kode, '')) AS id,
+                cus_kode                                   AS cc_kode,
+                cus_nama                                   AS cc_nama,
+                cus_alamat                                 AS cc_alamat,
+                cus_cp                                     AS cc_cp,
+                cus_telp                                   AS cc_telp,
+                cus_kota                                   AS cc_kota,
+                'CUSTOMER'                                 AS sumber
+            FROM kencanaprint.tcustomer
+            WHERE cus_nama LIKE ? OR cus_kode LIKE ?
+            ORDER BY cus_nama ASC
+            LIMIT 50
+            `,
             [like, like],
         );
 
@@ -292,6 +272,25 @@ const createVisitPlan = async (req, res) => {
         return res
             .status(400)
             .json({ success: false, message: "tanggal_plan wajib" });
+
+    // Batasan Waktu: Rencana kunjungan untuk hari yang sama hanya dapat diinput sebelum jam 08:00 pagi WIB
+    const nowWib = getWIBDateTime();
+    const todayYmd = nowWib.toISOString().slice(0, 10); // YYYY-MM-DD
+    const currentHour = nowWib.getHours();
+
+    if (tanggal_plan < todayYmd) {
+        return res.status(400).json({
+            success: false,
+            message: "Tanggal rencana kunjungan tidak boleh kurang dari hari ini",
+        });
+    }
+
+    if (tanggal_plan === todayYmd && currentHour >= 8) {
+        return res.status(400).json({
+            success: false,
+            message: "Rencana kunjungan untuk hari yang sama hanya dapat diinput sebelum jam 08:00 pagi",
+        });
+    }
 
     const conn = await db.getConnection();
     try {
@@ -332,6 +331,20 @@ const createVisitPlan = async (req, res) => {
                 success: true,
                 message: "Plan sudah ada, diperbarui",
                 data: { id, isUpdate: true },
+            });
+        }
+
+        // Cek kuota maksimal 8 plan di hari yang sama sebelum insert baru
+        const [countRows] = await conn.query(
+            `SELECT COUNT(*) as count FROM tkunjungan WHERE user = ? AND DATE(tanggal_plan) = ?`,
+            [user, tanggal_plan],
+        );
+
+        if (countRows && countRows[0] && countRows[0].count >= 8) {
+            await conn.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Batas maksimal rencana kunjungan (visit plan) adalah 8 per hari",
             });
         }
 
@@ -389,11 +402,11 @@ const visitPlanById = async (req, res) => {
             k.note,
             k.catatan,
             k.realisasi,             -- ✅ tambahkan ini
-            c.cc_nama,
-            c.cc_alamat,
-            c.cc_kota
+            c.cus_nama AS cc_nama,
+            c.cus_alamat AS cc_alamat,
+            c.cus_kota AS cc_kota
         FROM tkunjungan k
-        LEFT JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         WHERE k.user = ?
             AND DATE(k.tanggal_plan) = ?
             AND k.cus_kode = ?
@@ -428,6 +441,55 @@ const updateVisitPlan = async (req, res) => {
     }
 
     try {
+        const [planRows] = await db.query(
+            `SELECT user, DATE_FORMAT(tanggal_plan, '%Y-%m-%d') as current_tgl FROM tkunjungan WHERE id = ?`,
+            [id]
+        );
+        if (planRows.length === 0) {
+            return res
+                .status(404)
+                .json({ success: false, message: "Data tidak ditemukan" });
+        }
+
+        const planUser = planRows[0].user;
+        const currentTgl = planRows[0].current_tgl;
+        const newTgl = String(tanggal_plan).trim().slice(0, 10);
+
+        // Batasan Waktu & Kuota hanya dicek jika ada perpindahan tanggal rencana
+        if (currentTgl !== newTgl) {
+            const nowWib = getWIBDateTime();
+            const todayYmd = nowWib.toISOString().slice(0, 10); // YYYY-MM-DD
+            const currentHour = nowWib.getHours();
+
+            if (newTgl < todayYmd) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Tanggal rencana kunjungan tidak boleh kurang dari hari ini",
+                });
+            }
+
+            // Batas waktu jam 8 pagi WIB untuk plan hari ini
+            if (newTgl === todayYmd && currentHour >= 8) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Rencana kunjungan untuk hari yang sama hanya dapat diinput sebelum jam 08:00 pagi",
+                });
+            }
+
+            // Batas kuota 8 plan di tanggal target
+            const [countRows] = await db.query(
+                `SELECT COUNT(*) as count FROM tkunjungan WHERE user = ? AND DATE(tanggal_plan) = ?`,
+                [planUser, newTgl]
+            );
+
+            if (countRows && countRows[0] && countRows[0].count >= 8) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Batas maksimal rencana kunjungan (visit plan) adalah 8 per hari pada tanggal target",
+                });
+            }
+        }
+
         const [result] = await db.query(
             `UPDATE tkunjungan
         SET tanggal_plan = CONCAT(?, ' 00:00:00'),
@@ -470,6 +532,15 @@ const createVisit = async (req, res) => {
         return res
             .status(400)
             .json({ success: false, message: "user, cus_kode, tanggal wajib" });
+    }
+
+    const nowWib = getWIBDateTime();
+    const todayYmd = nowWib.toISOString().slice(0, 10); // YYYY-MM-DD
+    if (tanggal.slice(0, 10) < todayYmd) {
+        return res.status(400).json({
+            success: false,
+            message: "Tanggal kunjungan tidak boleh kurang dari hari ini",
+        });
     }
 
     const conn = await db.getConnection();
@@ -582,11 +653,11 @@ const getVisitFromPlan = async (req, res) => {
             k.realisasi,
             k.latitude,
             k.longitude,
-            c.cc_nama,
-            c.cc_alamat,
-            c.cc_kota
+            c.cus_nama AS cc_nama,
+            c.cus_alamat AS cc_alamat,
+            c.cus_kota AS cc_kota
         FROM tkunjungan k
-        LEFT JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         WHERE k.user = ?
             AND k.cus_kode = ?
             AND DATE(k.tanggal_plan) = ?
@@ -655,6 +726,17 @@ const updateVisit = async (req, res) => {
             success: false,
             message: "ID kunjungan tidak valid",
         });
+    }
+
+    if (tanggal) {
+        const nowWib = getWIBDateTime();
+        const todayYmd = nowWib.toISOString().slice(0, 10); // YYYY-MM-DD
+        if (tanggal.slice(0, 10) < todayYmd) {
+            return res.status(400).json({
+                success: false,
+                message: "Tanggal kunjungan tidak boleh kurang dari hari ini",
+            });
+        }
     }
 
     try {
@@ -774,8 +856,8 @@ const getRekapVisit = async (req, res) => {
             DATE_FORMAT(a.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
             DATE_FORMAT(a.tanggal, '%Y-%m-%d') AS tanggal,
             a.cus_kode,
-            b.cc_nama,
-            b.cc_alamat,
+            b.cus_nama AS cc_nama,
+            b.cus_alamat AS cc_alamat,
             a.latitude,
             a.longitude,
             a.note,
@@ -788,7 +870,7 @@ const getRekapVisit = async (req, res) => {
                 ELSE CONCAT(?, CAST(a.foto AS CHAR(255)))
             END AS foto_url
             FROM tkunjungan a
-            LEFT JOIN tcaloncustomer b ON b.cc_kode = a.cus_kode
+            LEFT JOIN kencanaprint.tcustomer b ON b.cus_kode = a.cus_kode
             LEFT JOIN tkaryawan k ON k.kar_nama = a.user AND k.kar_isaktif = 1
             WHERE a.user = ?
             AND a.realisasi = 'Y'
@@ -862,7 +944,7 @@ const rekapVisitWA = async (req, res) => {
         let sql = `
         SELECT
             ku.id,
-            ca.cc_nama,
+            ca.cus_nama AS cc_nama,
             ku.cus_kode,
             DATE_FORMAT(ku.tanggal, '%Y-%m-%d') AS tanggal_visit,
             DATE_FORMAT(ku.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
@@ -873,7 +955,7 @@ const rekapVisitWA = async (req, res) => {
             ka.kar_cabang AS user_cabang
         FROM tkunjungan ku
         INNER JOIN tkaryawan ka ON ka.kar_nama = ku.user
-        INNER JOIN tcaloncustomer ca ON ca.cc_kode = ku.cus_kode
+        INNER JOIN kencanaprint.tcustomer ca ON ca.cus_kode = ku.cus_kode
         WHERE ku.user = ?
             AND ku.realisasi = 'Y'
             AND DATE(ku.tanggal) >= ?
@@ -991,13 +1073,12 @@ const getRekapVisitPlan = async (req, res) => {
             k.note,
             k.catatan,
             k.realisasi,
-            COALESCE(c.cc_nama, cus.cus_nama) AS cc_nama,
-            COALESCE(c.cc_alamat, cus.cus_alamat) AS cc_alamat,
-            COALESCE(c.cc_kota, cus.cus_kota) AS cc_kota
+            c.cus_nama AS cc_nama,
+            c.cus_alamat AS cc_alamat,
+            c.cus_kota AS cc_kota
         FROM pick p
         JOIN tkunjungan k ON k.id = p.pick_id
-        LEFT JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
-        LEFT JOIN tcustomer cus ON cus.cus_kode = k.cus_kode
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
         `;
@@ -1078,9 +1159,9 @@ const rekapVisitPlanWA = async (req, res) => {
         k.id,
         DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
         k.cus_kode,
-        COALESCE(c.cc_nama, cus.cus_nama) AS cc_nama,
-        COALESCE(c.cc_alamat, cus.cus_alamat) AS cc_alamat,
-        COALESCE(c.cc_kota, cus.cus_kota) AS cc_kota,
+        c.cus_nama AS cc_nama,
+        c.cus_alamat AS cc_alamat,
+        c.cus_kota AS cc_kota,
         k.note,
         k.catatan,
         k.realisasi,
@@ -1101,8 +1182,7 @@ const rekapVisitPlanWA = async (req, res) => {
             AND DATE(t.tanggal_plan) <= ?
         GROUP BY t.user, DATE(t.tanggal_plan), t.cus_kode
         ) p ON p.pick_id = k.id
-        LEFT JOIN tcaloncustomer c ON c.cc_kode = k.cus_kode
-        LEFT JOIN tcustomer cus ON cus.cus_kode = k.cus_kode
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         LEFT JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
     `;
@@ -1180,29 +1260,29 @@ const getRekapCalonCustomer = async (req, res) => {
     try {
         let query = `
         SELECT
-            cc_id   AS id,
-            cc_kode,
-            cc_nama,
-            cc_alamat,
-            cc_cp,
-            cc_telp,
-            cc_kota
-        FROM tcaloncustomer
+            cus_kode  AS id,
+            cus_kode  AS cc_kode,
+            cus_nama  AS cc_nama,
+            cus_alamat AS cc_alamat,
+            cus_cp    AS cc_cp,
+            cus_telp  AS cc_telp,
+            cus_kota  AS cc_kota
+        FROM kencanaprint.tcustomer
         WHERE 1=1
         `;
         const params = [];
 
         if (cabang && String(cabang).trim() !== "") {
-            query += ` AND cc_kota = ?`;
+            query += ` AND cus_kota = ?`;
             params.push(String(cabang).trim());
         }
 
         if (cc_nama && String(cc_nama).trim() !== "") {
-            query += ` AND cc_nama LIKE ?`;
+            query += ` AND cus_nama LIKE ?`;
             params.push(`%${String(cc_nama).trim()}%`);
         }
 
-        query += ` ORDER BY cc_id DESC`;
+        query += ` ORDER BY cus_kode DESC`;
 
         // limit default hanya kalau cabang kosong
         const safeLimit = Math.min(Number(limit || 200), 1000); // max 1000
@@ -1245,50 +1325,22 @@ const rekapCalonCustomerWA = async (req, res) => {
 
         let query = `
         SELECT
-            x.id,
-            x.cc_kode,
-            x.cc_nama,
-            x.cc_alamat,
-            x.cc_cp,
-            x.cc_telp,
-            x.cc_kota,
-            x.sumber
-        FROM (
-            -- 1) Calon customer
-            SELECT
-            cc_id     AS id,
-            cc_kode   AS cc_kode,
-            cc_nama   AS cc_nama,
-            cc_alamat AS cc_alamat,
-            cc_cp     AS cc_cp,
-            cc_telp   AS cc_telp,
-            cc_kota   AS cc_kota,
-            'CALONCUSTOMER' AS sumber
-            FROM tcaloncustomer
-            WHERE cc_nama LIKE ?
-            ${cab ? "AND cc_kota = ?" : ""}
-
-            UNION ALL
-
-            -- 2) Customer aktif
-            SELECT
-            cus_kodei AS id,
-            cus_kode  AS cc_kode,
-            cus_nama  AS cc_nama,
+            cus_kode   AS id,
+            cus_kode   AS cc_kode,
+            cus_nama   AS cc_nama,
             cus_alamat AS cc_alamat,
-            cus_cp    AS cc_cp,
-            cus_telp  AS cc_telp,
-            cus_kota  AS cc_kota,
+            cus_cp     AS cc_cp,
+            cus_telp   AS cc_telp,
+            cus_kota   AS cc_kota,
             'CUSTOMER' AS sumber
-            FROM tcustomer
-            WHERE cus_nama LIKE ?
-            ${cab ? "AND cus_kota = ?" : ""}
-        ) x
-        ORDER BY x.cc_nama ASC
+        FROM kencanaprint.tcustomer
+        WHERE cus_nama LIKE ?
+        ${cab ? "AND cus_kota = ?" : ""}
+        ORDER BY cus_nama ASC
         LIMIT ${MAX_WA_ROWS}
         `;
 
-        const params = cab ? [like, cab, like, cab] : [like, like];
+        const params = cab ? [like, cab] : [like];
 
         const [rows] = await db.query(query, params);
 
