@@ -351,6 +351,7 @@ const getAchievementOmset = async (req, res) => {
         FROM v_mkt_omset
         WHERE tahun = ?
             AND bulan = ?
+            AND jabatan != 'MO'
         `;
         const params = [tahun, bulan];
 
