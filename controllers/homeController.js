@@ -304,7 +304,6 @@ const createVisitPlan = async (req, res) => {
         WHERE user = ?
             AND cus_kode = ?
             AND DATE(tanggal_plan) = ?
-        ORDER BY (realisasi='Y') DESC, id DESC
         LIMIT 1
         FOR UPDATE
         `,
@@ -312,25 +311,10 @@ const createVisitPlan = async (req, res) => {
         );
 
         if (exist.length > 0) {
-            const id = exist[0].id;
-
-            // Kalau sudah ada plan, cukup update isiannya (jangan insert baru)
-            await conn.query(
-                `
-            UPDATE tkunjungan
-            SET note = ?, tanggal_plan = CONCAT(?, ' 00:00:00')
-            WHERE id = ?
-            LIMIT 1
-            `,
-                [note, tanggal_plan, id],
-            );
-
-            await conn.commit();
-            logVisitPlanAction("update", { user, cus_kode, tanggal_plan, id });
-            return res.json({
-                success: true,
-                message: "Plan sudah ada, diperbarui",
-                data: { id, isUpdate: true },
+            await conn.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Plan sudah ada",
             });
         }
 
@@ -406,7 +390,7 @@ const visitPlanById = async (req, res) => {
             c.cus_alamat AS cc_alamat,
             c.cus_kota AS cc_kota
         FROM tkunjungan k
-        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
+        LEFT JOIN v_customer c ON c.cus_kode = k.cus_kode
         WHERE k.user = ?
             AND DATE(k.tanggal_plan) = ?
             AND k.cus_kode = ?
@@ -442,7 +426,7 @@ const updateVisitPlan = async (req, res) => {
 
     try {
         const [planRows] = await db.query(
-            `SELECT user, DATE_FORMAT(tanggal_plan, '%Y-%m-%d') as current_tgl FROM tkunjungan WHERE id = ?`,
+            `SELECT user, cus_kode, DATE_FORMAT(tanggal_plan, '%Y-%m-%d') as current_tgl FROM tkunjungan WHERE id = ?`,
             [id]
         );
         if (planRows.length === 0) {
@@ -457,6 +441,21 @@ const updateVisitPlan = async (req, res) => {
 
         // Batasan Waktu & Kuota hanya dicek jika ada perpindahan tanggal rencana
         if (currentTgl !== newTgl) {
+            const planCusKode = planRows[0].cus_kode;
+
+            // Cek duplikasi plan untuk customer & tanggal target yang sama
+            const [dupRows] = await db.query(
+                `SELECT id FROM tkunjungan WHERE user = ? AND cus_kode = ? AND DATE(tanggal_plan) = ? LIMIT 1`,
+                [planUser, planCusKode, newTgl]
+            );
+
+            if (dupRows.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Plan sudah ada",
+                });
+            }
+
             const nowWib = getWIBDateTime();
             const todayYmd = nowWib.toISOString().slice(0, 10); // YYYY-MM-DD
             const currentHour = nowWib.getHours();
@@ -657,7 +656,7 @@ const getVisitFromPlan = async (req, res) => {
             c.cus_alamat AS cc_alamat,
             c.cus_kota AS cc_kota
         FROM tkunjungan k
-        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
+        LEFT JOIN v_customer c ON c.cus_kode = k.cus_kode
         WHERE k.user = ?
             AND k.cus_kode = ?
             AND DATE(k.tanggal_plan) = ?
@@ -870,7 +869,7 @@ const getRekapVisit = async (req, res) => {
                 ELSE CONCAT(?, CAST(a.foto AS CHAR(255)))
             END AS foto_url
             FROM tkunjungan a
-            LEFT JOIN kencanaprint.tcustomer b ON b.cus_kode = a.cus_kode
+            LEFT JOIN v_customer b ON b.cus_kode = a.cus_kode
             LEFT JOIN tkaryawan k ON k.kar_nama = a.user AND k.kar_isaktif = 1
             WHERE a.user = ?
             AND a.realisasi = 'Y'
@@ -955,7 +954,7 @@ const rekapVisitWA = async (req, res) => {
             ka.kar_cabang AS user_cabang
         FROM tkunjungan ku
         INNER JOIN tkaryawan ka ON ka.kar_nama = ku.user
-        INNER JOIN kencanaprint.tcustomer ca ON ca.cus_kode = ku.cus_kode
+        INNER JOIN v_customer ca ON ca.cus_kode = ku.cus_kode
         WHERE ku.user = ?
             AND ku.realisasi = 'Y'
             AND DATE(ku.tanggal) >= ?
@@ -1078,7 +1077,7 @@ const getRekapVisitPlan = async (req, res) => {
             c.cus_kota AS cc_kota
         FROM pick p
         JOIN tkunjungan k ON k.id = p.pick_id
-        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
+        LEFT JOIN v_customer c ON c.cus_kode = k.cus_kode
         INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
         `;
@@ -1182,7 +1181,7 @@ const rekapVisitPlanWA = async (req, res) => {
             AND DATE(t.tanggal_plan) <= ?
         GROUP BY t.user, DATE(t.tanggal_plan), t.cus_kode
         ) p ON p.pick_id = k.id
-        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
+        LEFT JOIN v_customer c ON c.cus_kode = k.cus_kode
         LEFT JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
     `;
