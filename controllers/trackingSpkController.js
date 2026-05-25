@@ -46,6 +46,7 @@ const getTrackingSpkList = async (req, res) => {
             normalizeDate(req.query.startDate) || monthRange.start;
         const endDate = normalizeDate(req.query.endDate) || monthRange.end;
         const search = String(req.query.search || "").trim();
+        const filterStatus = String(req.query.filterStatus || "").trim().toLowerCase();
         const limit = Math.min(
             Math.max(Number(req.query.limit) || 100, 1),
             300,
@@ -56,6 +57,15 @@ const getTrackingSpkList = async (req, res) => {
         if (!managerRole) {
             ownerFilterSql = "AND COALESCE(s.spk_sal_kode, '') = ?";
             params.push(authSalesKode);
+        }
+
+        let filterStatusSql = "";
+        if (filterStatus === "sudah") {
+            filterStatusSql = "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) >= s.spk_jumlah";
+        } else if (filterStatus === "proses") {
+            filterStatusSql = "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) < s.spk_jumlah AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) > 0";
+        } else if (filterStatus === "belum") {
+            filterStatusSql = "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) = 0";
         }
 
         let searchSql = "";
@@ -87,6 +97,7 @@ const getTrackingSpkList = async (req, res) => {
               AND s.spk_tanggal <= ?
               ${ownerFilterSql}
               ${searchSql}
+              ${filterStatusSql}
             ORDER BY s.spk_tanggal DESC, s.spk_nomor DESC
             LIMIT ?
             `,

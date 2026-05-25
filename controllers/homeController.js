@@ -1054,6 +1054,8 @@ const getRekapVisitPlan = async (req, res) => {
     }
 
     try {
+        const PUBLIC_BASE_URL =
+            process.env.PUBLIC_BASE_URL || getPublicBaseUrl(req);
         let sql = `
         WITH pick AS (
             SELECT
@@ -1068,10 +1070,19 @@ const getRekapVisitPlan = async (req, res) => {
         SELECT
             k.id,
             DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
+            DATE_FORMAT(k.tanggal, '%Y-%m-%d') AS tanggal,
             k.cus_kode,
             k.note,
             k.catatan,
             k.realisasi,
+            k.latitude,
+            k.longitude,
+            CAST(k.foto AS CHAR(255)) AS foto,
+            CASE
+                WHEN k.foto IS NULL OR CAST(k.foto AS CHAR(255)) = '' THEN NULL
+                WHEN CAST(k.foto AS CHAR(255)) LIKE 'http%' THEN CAST(k.foto AS CHAR(255))
+                ELSE CONCAT(?, CAST(k.foto AS CHAR(255)))
+            END AS foto_url,
             c.cus_nama AS cc_nama,
             c.cus_alamat AS cc_alamat,
             c.cus_kota AS cc_kota
@@ -1082,7 +1093,7 @@ const getRekapVisitPlan = async (req, res) => {
         WHERE k.user = ?
         `;
 
-        const params = [user, tanggal_awal, tanggal_akhir, user];
+        const params = [user, tanggal_awal, tanggal_akhir, PUBLIC_BASE_URL, user];
 
         if (cabang) {
             sql += ` AND ka.kar_cabang = ?`;
@@ -1467,7 +1478,7 @@ const getUser = async (req, res) => {
 
     try {
         const [rows] = await db.query(
-            `SELECT kar_nama, kar_cabang, kar_jabatan 
+            `SELECT kar_nama, kar_cabang, kar_jabatan, sls_kode 
                 FROM tkaryawan 
                 WHERE kar_isaktif = 1 
                 AND kar_jabatan = 'SALES' 

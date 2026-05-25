@@ -46,6 +46,9 @@ const getTrackingMapList = async (req, res) => {
             normalizeDate(req.query.startDate) || monthRange.start;
         const endDate = normalizeDate(req.query.endDate) || monthRange.end;
         const search = String(req.query.search || "").trim();
+        const sales = String(req.query.sales || "").trim();
+        const filterBast = String(req.query.filterBast || "").trim().toLowerCase();
+        const filterSjMap = String(req.query.filterSjMap || "").trim().toLowerCase();
 
         const params = [startDate, endDate];
         let ownerFilterSql = "";
@@ -69,6 +72,25 @@ const getTrackingMapList = async (req, res) => {
             params.push(like, like, like, like, like, like);
         }
 
+        if (sales) {
+            searchSql += " AND COALESCE(s.sal_nama, '') LIKE ? ";
+            params.push(`%${sales}%`);
+        }
+
+        let filterBastSql = "";
+        if (filterBast === "belum") {
+            filterBastSql = "AND k.mspk_nomor IS NULL";
+        } else if (filterBast === "sudah") {
+            filterBastSql = "AND k.mspk_nomor IS NOT NULL";
+        }
+
+        let filterSjMapSql = "";
+        if (filterSjMap === "belum") {
+            filterSjMapSql = "AND k.mspk_nomor IS NOT NULL AND sh.SJ_Nomor IS NULL";
+        } else if (filterSjMap === "sudah") {
+            filterSjMapSql = "AND sh.SJ_Nomor IS NOT NULL";
+        }
+
         const [rows] = await db.query(
             `
             SELECT
@@ -87,20 +109,24 @@ const getTrackingMapList = async (req, res) => {
             FROM tmemospk m
             INNER JOIN tpenawaran_hdr h
                 ON h.pen_nomor = m.mspk_pen_nomor
+            LEFT JOIN tsales s
+                ON s.sal_kode = h.pen_sal_kode
             LEFT JOIN tcustomer ch
                 ON ch.cus_kode = h.pen_cus_kode
             LEFT JOIN tcustomer cm
                 ON cm.cus_kode = m.mspk_cus_kode
             LEFT JOIN tkesesuaianmap k
-                ON TRIM(COALESCE(k.mspk_nomor, '')) = TRIM(COALESCE(m.mspk_nomor, ''))
+                ON k.mspk_nomor = m.mspk_nomor
             LEFT JOIN tsj_dtl_memo sd
-                ON TRIM(COALESCE(sd.SJD_MSPK_Nomor, '')) = TRIM(COALESCE(m.mspk_nomor, ''))
+                ON sd.SJD_MSPK_Nomor = m.mspk_nomor
             LEFT JOIN tsj_hdr_memo sh
-                ON TRIM(COALESCE(sh.SJ_Nomor, '')) = TRIM(COALESCE(sd.SJD_SJ_Nomor, ''))
+                ON sh.SJ_Nomor = sd.SJD_SJ_Nomor
             WHERE m.mspk_tanggal >= ?
               AND m.mspk_tanggal <= ?
               ${ownerFilterSql}
               ${searchSql}
+              ${filterBastSql}
+              ${filterSjMapSql}
             GROUP BY
                 m.mspk_nomor,
                 m.mspk_tanggal,
@@ -117,6 +143,27 @@ const getTrackingMapList = async (req, res) => {
             params,
         );
 
+        const filterParams = [startDate, endDate];
+        let filterOwnerSql = "";
+        if (!managerRole) {
+            filterOwnerSql = "AND COALESCE(h.pen_sal_kode, '') = ?";
+            filterParams.push(authSalesKode);
+        }
+
+        const [filterRows] = await db.query(
+            `
+            SELECT DISTINCT
+                COALESCE(s.sal_nama, '') AS sales
+            FROM tmemospk m
+            INNER JOIN tpenawaran_hdr h ON h.pen_nomor = m.mspk_pen_nomor
+            LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
+            WHERE m.mspk_tanggal >= ? AND m.mspk_tanggal <= ?
+              ${filterOwnerSql}
+            `,
+            filterParams
+        );
+        const availableSales = Array.from(new Set(filterRows.map(r => r.sales).filter(Boolean))).sort();
+
         return res.json({
             success: true,
             data: rows || [],
@@ -125,6 +172,9 @@ const getTrackingMapList = async (req, res) => {
                 endDate,
                 search,
                 count: rows?.length || 0,
+                filter_options: {
+                    sales: availableSales
+                }
             },
         });
     } catch (err) {
