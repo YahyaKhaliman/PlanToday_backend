@@ -95,6 +95,7 @@ const getTrackingSpkList = async (req, res) => {
             FROM tspk s
             WHERE s.spk_tanggal >= ?
               AND s.spk_tanggal <= ?
+              AND COALESCE(s.spk_divisi, '') NOT IN ('3', '6')
               ${ownerFilterSql}
               ${searchSql}
               ${filterStatusSql}

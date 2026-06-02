@@ -123,6 +123,7 @@ const getTrackingMapList = async (req, res) => {
                 ON sh.SJ_Nomor = sd.SJD_SJ_Nomor
             WHERE m.mspk_tanggal >= ?
               AND m.mspk_tanggal <= ?
+              AND COALESCE(m.mspk_divisi, '') NOT IN ('3', '6')
               ${ownerFilterSql}
               ${searchSql}
               ${filterBastSql}
@@ -158,6 +159,7 @@ const getTrackingMapList = async (req, res) => {
             INNER JOIN tpenawaran_hdr h ON h.pen_nomor = m.mspk_pen_nomor
             LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
             WHERE m.mspk_tanggal >= ? AND m.mspk_tanggal <= ?
+              AND COALESCE(m.mspk_divisi, '') NOT IN ('3', '6')
               ${filterOwnerSql}
             `,
             filterParams
