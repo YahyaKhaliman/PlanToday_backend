@@ -1290,15 +1290,22 @@ const getRekapCalonCustomer = async (req, res) => {
 
     try {
         let query = `
-        SELECT
-            cus_kode  AS id,
-            cus_kode  AS cc_kode,
-            cus_nama  AS cc_nama,
-            cus_alamat AS cc_alamat,
-            cus_cp    AS cc_cp,
-            cus_telp  AS cc_telp,
-            cus_kota  AS cc_kota
-        FROM kencanaprint.tcustomer
+          SELECT
+              cus_kode  AS id,
+              cus_kode  AS cc_kode,
+              cus_nama  AS cc_nama,
+              cus_alamat AS cc_alamat,
+              cus_cp    AS cc_cp,
+              cus_telp  AS cc_telp,
+              cus_kota  AS cc_kota,
+              cus_email AS cc_email,
+              cus_korporasi AS cc_korporasi,
+              cus_jenisusaha AS cc_jenisusaha,
+              cus_npwp  AS cc_npwp,
+              cus_nama_npwp AS cc_nama_npwp,
+              cus_alamat_npwp AS cc_alamat_npwp,
+              cus_kota_npwp AS cc_kota_npwp
+          FROM kencanaprint.tcustomer
         WHERE 1=1
         `;
         const params = [];
