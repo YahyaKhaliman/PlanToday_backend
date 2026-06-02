@@ -180,8 +180,11 @@ const getExistingImageMeta = (nomor, slot) => {
 const getYearFromTanggal = (tanggal) =>
     Number(String(tanggal || "").slice(0, 4));
 
-const isBasicEmail = (value) =>
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+const isBasicEmail = (value) => {
+    const val = String(value || "").trim();
+    if (val === "-") return true;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+};
 
 const isBasicNpwp = (value) => {
     const digits = String(value || "").replace(/\D/g, "");
