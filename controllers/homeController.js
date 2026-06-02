@@ -106,6 +106,13 @@ const updateCalonCustomerByKode = async (req, res) => {
     const cc_alamat = String(req.body.cc_alamat || "").trim();
     const cc_cp = String(req.body.cc_cp || "").trim();
     const cc_telp = String(req.body.cc_telp || "").trim();
+    const cc_email = String(req.body.cc_email || "").trim();
+    const cc_korporasi = String(req.body.cc_korporasi || "N").trim();
+    const cc_jenisusaha = String(req.body.cc_jenisusaha || "").trim();
+    const cc_npwp = String(req.body.cc_npwp || "").trim();
+    const cc_nama_npwp = String(req.body.cc_nama_npwp || "").trim();
+    const cc_alamat_npwp = String(req.body.cc_alamat_npwp || "").trim();
+    const cc_kota_npwp = String(req.body.cc_kota_npwp || "").trim();
 
     if (!cc_kode) {
         return res
@@ -137,7 +144,14 @@ const updateCalonCustomerByKode = async (req, res) => {
             cus_kota = ?,
             cus_alamat = ?,
             cus_cp = ?,
-            cus_telp = ?
+            cus_telp = ?,
+            cus_email = ?,
+            cus_korporasi = ?,
+            cus_jenisusaha = ?,
+            cus_npwp = ?,
+            cus_nama_npwp = ?,
+            cus_alamat_npwp = ?,
+            cus_kota_npwp = ?
         WHERE cus_kode = ?
         LIMIT 1
         `;
@@ -148,6 +162,13 @@ const updateCalonCustomerByKode = async (req, res) => {
             cc_alamat || null,
             cc_cp || null,
             cc_telp || null,
+            cc_email || null,
+            cc_korporasi,
+            cc_jenisusaha || null,
+            cc_npwp || null,
+            cc_nama_npwp || null,
+            cc_alamat_npwp || null,
+            cc_kota_npwp || null,
             cc_kode,
         ];
 
