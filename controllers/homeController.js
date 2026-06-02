@@ -7,8 +7,8 @@ function safe(v, fallback = "-") {
 }
 function getWIBDateTime() {
     const d = new Date();
-    const utc = d.getTime() + (d.getTimezoneOffset() * 60 * 1000);
-    return new Date(utc + (3600000 * 7));
+    const utc = d.getTime() + d.getTimezoneOffset() * 60 * 1000;
+    return new Date(utc + 3600000 * 7);
 }
 function formatTanggalID(date) {
     return new Date(date).toLocaleDateString("id-ID", {
@@ -72,7 +72,15 @@ const calonCustomer = async (req, res) => {
             `INSERT INTO kencanaprint.tcustomer
              (cus_kode, cus_nama, cus_alamat, cus_kota, cus_telp, cus_cp, cus_aktif, user_create, date_create)
              VALUES (?, ?, ?, ?, ?, ?, 1, ?, NOW())`,
-            [ccKode, nama, alamat || "", cabang || "", telp || "", pic || "", "PlanToday"],
+            [
+                ccKode,
+                nama,
+                alamat || "",
+                cabang || "",
+                telp || "",
+                pic || "",
+                "PlanToday",
+            ],
         );
 
         await conn.commit();
@@ -251,6 +259,7 @@ const cariCustomer = async (req, res) => {
                 cus_cp                                     AS cc_cp,
                 cus_telp                                   AS cc_telp,
                 cus_kota                                   AS cc_kota,
+                cus_email                                  AS cc_email,
                 'CUSTOMER'                                 AS sumber
             FROM kencanaprint.tcustomer
             WHERE cus_nama LIKE ? OR cus_kode LIKE ?
@@ -302,14 +311,16 @@ const createVisitPlan = async (req, res) => {
     if (tanggal_plan < todayYmd) {
         return res.status(400).json({
             success: false,
-            message: "Tanggal rencana kunjungan tidak boleh kurang dari hari ini",
+            message:
+                "Tanggal rencana kunjungan tidak boleh kurang dari hari ini",
         });
     }
 
     if (tanggal_plan === todayYmd && currentHour >= 8) {
         return res.status(400).json({
             success: false,
-            message: "Rencana kunjungan untuk hari yang sama hanya dapat diinput sebelum jam 08:00 pagi",
+            message:
+                "Rencana kunjungan untuk hari yang sama hanya dapat diinput sebelum jam 08:00 pagi",
         });
     }
 
@@ -349,7 +360,8 @@ const createVisitPlan = async (req, res) => {
             await conn.rollback();
             return res.status(400).json({
                 success: false,
-                message: "Batas maksimal rencana kunjungan (visit plan) adalah 8 per hari",
+                message:
+                    "Batas maksimal rencana kunjungan (visit plan) adalah 8 per hari",
             });
         }
 
@@ -448,7 +460,7 @@ const updateVisitPlan = async (req, res) => {
     try {
         const [planRows] = await db.query(
             `SELECT user, cus_kode, DATE_FORMAT(tanggal_plan, '%Y-%m-%d') as current_tgl FROM tkunjungan WHERE id = ?`,
-            [id]
+            [id],
         );
         if (planRows.length === 0) {
             return res
@@ -467,7 +479,7 @@ const updateVisitPlan = async (req, res) => {
             // Cek duplikasi plan untuk customer & tanggal target yang sama
             const [dupRows] = await db.query(
                 `SELECT id FROM tkunjungan WHERE user = ? AND cus_kode = ? AND DATE(tanggal_plan) = ? LIMIT 1`,
-                [planUser, planCusKode, newTgl]
+                [planUser, planCusKode, newTgl],
             );
 
             if (dupRows.length > 0) {
@@ -484,7 +496,8 @@ const updateVisitPlan = async (req, res) => {
             if (newTgl < todayYmd) {
                 return res.status(400).json({
                     success: false,
-                    message: "Tanggal rencana kunjungan tidak boleh kurang dari hari ini",
+                    message:
+                        "Tanggal rencana kunjungan tidak boleh kurang dari hari ini",
                 });
             }
 
@@ -492,20 +505,22 @@ const updateVisitPlan = async (req, res) => {
             if (newTgl === todayYmd && currentHour >= 8) {
                 return res.status(400).json({
                     success: false,
-                    message: "Rencana kunjungan untuk hari yang sama hanya dapat diinput sebelum jam 08:00 pagi",
+                    message:
+                        "Rencana kunjungan untuk hari yang sama hanya dapat diinput sebelum jam 08:00 pagi",
                 });
             }
 
             // Batas kuota 8 plan di tanggal target
             const [countRows] = await db.query(
                 `SELECT COUNT(*) as count FROM tkunjungan WHERE user = ? AND DATE(tanggal_plan) = ?`,
-                [planUser, newTgl]
+                [planUser, newTgl],
             );
 
             if (countRows && countRows[0] && countRows[0].count >= 8) {
                 return res.status(400).json({
                     success: false,
-                    message: "Batas maksimal rencana kunjungan (visit plan) adalah 8 per hari pada tanggal target",
+                    message:
+                        "Batas maksimal rencana kunjungan (visit plan) adalah 8 per hari pada tanggal target",
                 });
             }
         }
@@ -1114,7 +1129,13 @@ const getRekapVisitPlan = async (req, res) => {
         WHERE k.user = ?
         `;
 
-        const params = [user, tanggal_awal, tanggal_akhir, PUBLIC_BASE_URL, user];
+        const params = [
+            user,
+            tanggal_awal,
+            tanggal_akhir,
+            PUBLIC_BASE_URL,
+            user,
+        ];
 
         if (cabang) {
             sql += ` AND ka.kar_cabang = ?`;
@@ -1298,7 +1319,11 @@ const getRekapCalonCustomer = async (req, res) => {
               cus_cp    AS cc_cp,
               cus_telp  AS cc_telp,
               cus_kota  AS cc_kota,
-              cus_email AS cc_email,
+                CASE
+                    WHEN cus_email IS NULL OR TRIM(cus_email) = '' OR cus_email = '-'
+                    THEN '-'
+                    ELSE cus_email
+                END AS cc_email,
               cus_korporasi AS cc_korporasi,
               cus_jenisusaha AS cc_jenisusaha,
               cus_npwp  AS cc_npwp,
