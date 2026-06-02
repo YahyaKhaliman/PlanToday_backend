@@ -158,17 +158,17 @@ const updateCalonCustomerByKode = async (req, res) => {
 
         const params = [
             cc_nama,
-            cc_kota || null,
-            cc_alamat || null,
-            cc_cp || null,
-            cc_telp || null,
-            cc_email || null,
+            cc_kota,
+            cc_alamat,
+            cc_cp,
+            cc_telp,
+            cc_email,
             cc_korporasi,
-            cc_jenisusaha || null,
-            cc_npwp || null,
-            cc_nama_npwp || null,
-            cc_alamat_npwp || null,
-            cc_kota_npwp || null,
+            cc_jenisusaha,
+            cc_npwp,
+            cc_nama_npwp,
+            cc_alamat_npwp,
+            cc_kota_npwp,
             cc_kode,
         ];
 
