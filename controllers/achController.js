@@ -101,34 +101,39 @@ const getAchievementRange = async (req, res) => {
 
         const sql = `
         SELECT
-            v.kode,
-            MAX(v.nik) AS nik,
-            MAX(v.nama) AS nama,
-            MAX(v.jabatan) AS jabatan,
-            CAST(ROUND(SUM(v.target), 0) AS UNSIGNED)    AS target,
-            CAST(ROUND(SUM(v.realisasi), 0) AS UNSIGNED) AS realisasi,
+            CASE WHEN s.sal_jabatan = 'CMO' THEN 'CMO' ELSE s.sal_kode END AS kode,
+            MAX(COALESCE(s.sal_nik, '')) AS nik,
+            MAX(CASE WHEN s.sal_jabatan = 'CMO' THEN 'CMO' ELSE COALESCE(s.sal_nama, t.USER) END) AS nama,
+            MAX(COALESCE(s.sal_jabatan, t.kode)) AS jabatan,
+            CAST(ROUND(SUM(t.target), 0) AS UNSIGNED) AS target,
+            CAST(ROUND(SUM(COALESCE(o.realisasi, 0)), 0) AS UNSIGNED) AS realisasi,
             CASE
-            WHEN COALESCE(SUM(v.target), 0) = 0 THEN
-                CASE WHEN COALESCE(SUM(v.realisasi), 0) > 0 THEN 100 ELSE 0 END
-            ELSE ROUND((COALESCE(SUM(v.realisasi), 0) / COALESCE(SUM(v.target), 0)) * 100, 2)
+            WHEN COALESCE(SUM(t.target), 0) = 0 THEN
+                CASE WHEN COALESCE(SUM(o.realisasi), 0) > 0 THEN 100 ELSE 0 END
+            ELSE ROUND((COALESCE(SUM(o.realisasi), 0) / COALESCE(SUM(t.target), 0)) * 100, 2)
             END AS ach
-        FROM kpi.v_mkt_omset v
+        FROM kpi.v_target_mkt_monthly t
+        JOIN kencanaprint.tsales s ON (
+            t.kode_sales = s.sal_kode 
+            OR (t.kode_sales = 'MO' AND s.sal_jabatan = 'CMO')
+        )
+        LEFT JOIN kpi.v_mkt_omset o ON s.sal_kode = o.kode AND t.tahun = o.tahun AND t.bulan = o.bulan
         WHERE
-            v.jabatan != 'MO'
+            s.sal_jabatan != 'MO'
             AND
-            (v.tahun > ? OR (v.tahun = ? AND v.bulan >= ?))
+            (t.tahun > ? OR (t.tahun = ? AND t.bulan >= ?))
             AND
-            (v.tahun < ? OR (v.tahun = ? AND v.bulan <= ?))
+            (t.tahun < ? OR (t.tahun = ? AND t.bulan <= ?))
             AND (
             ? = '' OR (
-                LOWER(v.nama) LIKE CONCAT('%', LOWER(?), '%')
-                OR LOWER(v.jabatan) LIKE CONCAT('%', LOWER(?), '%')
+                LOWER(COALESCE(s.sal_nama, t.USER)) LIKE CONCAT('%', LOWER(?), '%')
+                OR LOWER(COALESCE(s.sal_jabatan, t.kode)) LIKE CONCAT('%', LOWER(?), '%')
             )
             )
-            AND (? = '' OR v.jabatan = ?)
-            ${isManager ? "" : "AND v.kode = ?"}
-        GROUP BY v.kode
-        ORDER BY MAX(v.jabatan), MAX(v.nama)
+            AND (? = '' OR COALESCE(s.sal_jabatan, t.kode) = ?)
+            ${isManager ? "" : "AND s.sal_kode = ?"}
+        GROUP BY s.sal_kode
+        ORDER BY MAX(COALESCE(s.sal_jabatan, t.kode)), MAX(COALESCE(s.sal_nama, t.USER))
         `;
 
         const params = [
