@@ -1441,6 +1441,68 @@ const deletePermintaanHargaImage = async (req, res) => {
     }
 };
 
+const getPermintaanHargaStatusCounts = async (req, res) => {
+    try {
+        const monthRange = getCurrentMonthRange();
+        const startDate =
+            normalizeDate(req.query.startDate) || monthRange.start;
+        const endDate = normalizeDate(req.query.endDate) || monthRange.end;
+
+        const managerRole = isManagerUser(req);
+        const authSalesKode = String(req.user?.sales_kode || "").trim();
+
+        if (!managerRole && !authSalesKode) {
+            return res.status(403).json({
+                success: false,
+                message: "Sales tidak valid (sales_kode kosong)",
+            });
+        }
+
+        let query = `
+            SELECT 
+                COALESCE(mh_status, '') AS status,
+                COUNT(*) AS jumlah
+            FROM tmintaharga
+            WHERE mh_tanggal >= ?
+              AND mh_tanggal < DATE_ADD(?, INTERVAL 1 DAY)
+        `;
+        const params = [startDate, endDate];
+
+        if (!managerRole) {
+            query += " AND COALESCE(mh_sal_kode, '') = ?";
+            params.push(authSalesKode);
+        }
+
+        query += " GROUP BY mh_status";
+
+        const [rows] = await db.query(query, params);
+
+        const statusMap = {
+            BELUM: 0,
+            MINTA: 0,
+            WAIT: 0,
+            DONE: 0,
+            CANCEL: 0
+        };
+
+        for (const row of rows || []) {
+            const statusKey = String(row?.status || "").trim().toUpperCase();
+            statusMap[statusKey] = toNumber(row?.jumlah, 0);
+        }
+
+        return res.json({
+            success: true,
+            data: statusMap
+        });
+    } catch (err) {
+        console.error("[PermintaanHarga][StatusCounts][Error]", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message || "Gagal mengambil rincian status permintaan harga",
+        });
+    }
+};
+
 module.exports = {
     getPermintaanHargaList,
     getPermintaanHargaDetail,
@@ -1453,4 +1515,5 @@ module.exports = {
     uploadPermintaanHargaImageInternal,
     uploadPermintaanHargaImageBase64,
     deletePermintaanHargaImage,
+    getPermintaanHargaStatusCounts,
 };

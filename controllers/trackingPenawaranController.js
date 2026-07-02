@@ -1,26 +1,10 @@
 const db = require("../config/dbPenawaran");
-
-const normalizeDate = (value) => {
-    if (!value) return null;
-    const s = String(value).trim().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-    return s;
-};
-
-const getCurrentMonthRange = () => {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-    const toYmd = (d) => {
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        return `${yyyy}-${mm}-${dd}`;
-    };
-
-    return { start: toYmd(start), end: toYmd(end) };
-};
+const {
+    normalizeDate,
+    getCurrentMonthRange,
+    isManagerUser,
+    getAuthSalesKode,
+} = require("../utils/trackingHelper");
 
 const getUserCandidates = (req) => {
     const values = [req.user?.nama, req.user?.id]
@@ -28,13 +12,6 @@ const getUserCandidates = (req) => {
         .filter(Boolean);
     return Array.from(new Set(values));
 };
-
-const isManagerUser = (req) =>
-    String(req.user?.jabatan || "")
-        .trim()
-        .toUpperCase() === "MANAGER";
-
-const getAuthSalesKode = (req) => String(req.user?.sales_kode || "").trim();
 
 const getTrackingPenawaranList = async (req, res) => {
     try {
@@ -55,11 +32,7 @@ const getTrackingPenawaranList = async (req, res) => {
         const search = String(req.query.search || "").trim();
         const sales = String(req.query.sales || "").trim();
         const customer = String(req.query.customer || "").trim();
-        const limit = Math.min(
-            Math.max(Number(req.query.limit) || 100, 1),
-            300,
-        );
-
+        const status = String(req.query.status || "").trim().toUpperCase();
         const params = [startDate, endDate];
         if (!managerRole) {
             params.unshift(authSalesKode);
@@ -72,9 +45,11 @@ const getTrackingPenawaranList = async (req, res) => {
               AND (
                   h.pen_nomor LIKE ?
                   OR COALESCE(m.mspk_nomor, '') LIKE ?
+                  OR COALESCE(sp.spk_nomor, '') LIKE ?
                   OR COALESCE(m.mspk_keterangan, '') LIKE ?
+                  OR COALESCE(sp.spk_keterangan, '') LIKE ?
               )`;
-            params.push(like, like, like);
+            params.push(like, like, like, like, like);
         }
         if (sales) {
             searchSql += ` AND COALESCE(s.sal_nama, '') LIKE ? `;
@@ -85,7 +60,14 @@ const getTrackingPenawaranList = async (req, res) => {
             params.push(`%${customer}%`);
         }
 
-        params.push(limit);
+        let havingSql = "";
+        if (status === "OPEN") {
+            havingSql = "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = 0";
+        } else if (status === "PARSIAL") {
+            havingSql = "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) > 0 AND COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) < COUNT(DISTINCT d.pend_id)";
+        } else if (status === "CLOSE") {
+            havingSql = "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = COUNT(DISTINCT d.pend_id)";
+        }
 
         const ownerFilterSql = managerRole
             ? ""
@@ -99,13 +81,18 @@ const getTrackingPenawaranList = async (req, res) => {
                 COALESCE(c.cus_nama, '') AS customer,
                 COALESCE(s.sal_nama, '') AS sales,
                 COUNT(DISTINCT d.pend_id) AS total_item,
-                COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' THEN d.pend_id END) AS total_item_map,
-                GROUP_CONCAT(DISTINCT NULLIF(COALESCE(m.mspk_nomor, ''), '') ORDER BY m.mspk_nomor SEPARATOR ', ') AS no_map,
-                MAX(COALESCE(m.mspk_statuskerja, '')) AS map_status,
-                MAX(DATE_FORMAT(m.mspk_dateline, '%Y-%m-%d')) AS map_deadline,
-                MAX(COALESCE(m.mspk_workshop, '')) AS map_workshop,
-                MAX(COALESCE(m.mspk_keterangan, '')) AS map_keterangan,
-                MAX(COALESCE(m.mspk_kendala, '')) AS map_kendala
+                COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) AS total_item_map,
+                GROUP_CONCAT(DISTINCT NULLIF(COALESCE(m.mspk_nomor, sp.spk_nomor, ''), '') ORDER BY COALESCE(m.mspk_nomor, sp.spk_nomor) SEPARATOR ', ') AS no_map,
+                MAX(COALESCE(NULLIF(m.mspk_statuskerja, ''), NULLIF(sp.spk_statuskerja, ''), '')) AS map_status,
+                MAX(DATE_FORMAT(COALESCE(m.mspk_dateline, sp.spk_dateline), '%Y-%m-%d')) AS map_deadline,
+                MAX(COALESCE(NULLIF(m.mspk_workshop, ''), NULLIF(sp.spk_workshop, ''), '')) AS map_workshop,
+                MAX(COALESCE(NULLIF(m.mspk_keterangan, ''), NULLIF(sp.spk_keterangan, ''), '')) AS map_keterangan,
+                MAX(COALESCE(NULLIF(m.mspk_kendala, ''), NULLIF(sp.spk_pending, ''), '')) AS map_kendala,
+                CASE 
+                    WHEN COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = 0 THEN 'OPEN'
+                    WHEN COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = COUNT(DISTINCT d.pend_id) THEN 'CLOSE'
+                    ELSE 'PARSIAL'
+                END AS status_tracking
             FROM tpenawaran_hdr h
             INNER JOIN tpenawaran_dtl d
                 ON d.pend_pen_nomor = h.pen_nomor
@@ -116,12 +103,38 @@ const getTrackingPenawaranList = async (req, res) => {
             LEFT JOIN tmemospk m
                 ON m.mspk_pen_nomor = h.pen_nomor
                AND m.mspk_pen_id = d.pend_id
+            LEFT JOIN (
+                SELECT 
+                    spk_pen_nomor,
+                    spk_pen_id,
+                    GROUP_CONCAT(DISTINCT spk_nomor SEPARATOR ', ') AS spk_nomor,
+                    MAX(spk_nama) AS spk_nama,
+                    MIN(spk_tanggal) AS spk_tanggal,
+                    MAX(spk_dateline) AS spk_dateline,
+                    MAX(spk_divisi) AS spk_divisi,
+                    MAX(spk_perush_kode) AS spk_perush_kode,
+                    MAX(spk_cus_kode) AS spk_cus_kode,
+                    MAX(spk_workshop) AS spk_workshop,
+                    MAX(spk_statuskerja) AS spk_statuskerja,
+                    GROUP_CONCAT(DISTINCT spk_keterangan SEPARATOR '\n') AS spk_keterangan,
+                    MAX(spk_pending) AS spk_pending,
+                    MAX(spk_close) AS spk_close,
+                    MAX(user_create) AS user_create,
+                    MAX(user_modified) AS user_modified,
+                    MAX(date_create) AS date_create,
+                    MAX(date_modified) AS date_modified
+                FROM tspk
+                WHERE COALESCE(spk_pen_nomor, '') <> ''
+                GROUP BY spk_pen_nomor, spk_pen_id
+            ) sp
+                ON sp.spk_pen_nomor = h.pen_nomor
+               AND sp.spk_pen_id = d.pend_id
             WHERE ${ownerFilterSql}h.pen_tanggal >= ?
               AND h.pen_tanggal <= ?
               ${searchSql}
             GROUP BY h.pen_nomor, h.pen_tanggal, c.cus_nama, s.sal_nama
+            ${havingSql}
             ORDER BY h.pen_tanggal DESC, h.pen_nomor DESC
-            LIMIT ?
             `,
             params,
         );
@@ -205,36 +218,63 @@ const getTrackingPenawaranDetailByNoPenawaran = async (req, res) => {
                 h.pen_nomor AS no_penawaran,
                 d.pend_id AS pen_id,
                 COALESCE(d.pend_urutan, 0) AS urutan,
-                COALESCE(m.mspk_nomor, '') AS no_map,
+                COALESCE(NULLIF(m.mspk_nomor, ''), NULLIF(sp.spk_nomor, ''), '') AS no_map,
                 COALESCE(
                     NULLIF(m.mspk_nama, ''),
+                    NULLIF(sp.spk_nama, ''),
                     NULLIF(d.pend_nama_barang, ''),
                     NULLIF(h.pen_keterangan, ''),
                     ''
                 ) AS map_nama,
-                DATE_FORMAT(m.mspk_tanggal, '%Y-%m-%d') AS tanggal_map,
-                DATE_FORMAT(m.mspk_dateline, '%Y-%m-%d') AS map_deadline,
-                COALESCE(m.mspk_divisi, 0) AS map_divisi,
-                COALESCE(m.mspk_perush_kode, '') AS map_perusahaan_kode,
-                COALESCE(m.mspk_cus_kode, '') AS map_customer_kode,
+                DATE_FORMAT(COALESCE(m.mspk_tanggal, sp.spk_tanggal), '%Y-%m-%d') AS tanggal_map,
+                DATE_FORMAT(COALESCE(m.mspk_dateline, sp.spk_dateline), '%Y-%m-%d') AS map_deadline,
+                COALESCE(m.mspk_divisi, sp.spk_divisi, 0) AS map_divisi,
+                COALESCE(NULLIF(m.mspk_perush_kode, ''), NULLIF(sp.spk_perush_kode, ''), '') AS map_perusahaan_kode,
+                COALESCE(NULLIF(m.mspk_cus_kode, ''), NULLIF(sp.spk_cus_kode, ''), '') AS map_customer_kode,
                 COALESCE(m.mspk_mh_nomor, '') AS no_permintaan,
-                COALESCE(m.mspk_workshop, '') AS map_workshop,
-                COALESCE(m.mspk_statuskerja, '') AS map_status,
-                COALESCE(m.mspk_keterangan, '') AS map_keterangan,
-                COALESCE(m.mspk_kendala, '') AS map_kendala,
-                COALESCE(m.mspk_close, '') AS map_close,
+                COALESCE(NULLIF(m.mspk_workshop, ''), NULLIF(sp.spk_workshop, ''), '') AS map_workshop,
+                COALESCE(NULLIF(m.mspk_statuskerja, ''), NULLIF(sp.spk_statuskerja, ''), '') AS map_status,
+                COALESCE(NULLIF(m.mspk_keterangan, ''), NULLIF(sp.spk_keterangan, ''), '') AS map_keterangan,
+                COALESCE(NULLIF(m.mspk_kendala, ''), NULLIF(sp.spk_pending, ''), '') AS map_kendala,
+                COALESCE(m.mspk_close, sp.spk_close, '') AS map_close,
                 COALESCE(m.mspk_revisi, '') AS map_revisi,
                 COALESCE(m.mspk_revisi_no, 0) AS map_revisi_no,
-                COALESCE(m.user_create, '') AS map_user_create,
-                COALESCE(m.user_modified, '') AS map_user_modified,
-                DATE_FORMAT(m.date_create, '%Y-%m-%d %H:%i:%s') AS map_date_create,
-                DATE_FORMAT(m.date_modified, '%Y-%m-%d %H:%i:%s') AS map_date_modified
+                COALESCE(NULLIF(m.user_create, ''), NULLIF(sp.user_create, ''), '') AS map_user_create,
+                COALESCE(NULLIF(m.user_modified, ''), NULLIF(sp.user_modified, ''), '') AS map_user_modified,
+                DATE_FORMAT(COALESCE(m.date_create, sp.date_create), '%Y-%m-%d %H:%i:%s') AS map_date_create,
+                DATE_FORMAT(COALESCE(m.date_modified, sp.date_modified), '%Y-%m-%d %H:%i:%s') AS map_date_modified
             FROM tpenawaran_hdr h
             INNER JOIN tpenawaran_dtl d
                 ON d.pend_pen_nomor = h.pen_nomor
             LEFT JOIN tmemospk m
                 ON m.mspk_pen_nomor = h.pen_nomor
                AND m.mspk_pen_id = d.pend_id
+            LEFT JOIN (
+                SELECT 
+                    spk_pen_nomor,
+                    spk_pen_id,
+                    GROUP_CONCAT(DISTINCT spk_nomor SEPARATOR ', ') AS spk_nomor,
+                    MAX(spk_nama) AS spk_nama,
+                    MIN(spk_tanggal) AS spk_tanggal,
+                    MAX(spk_dateline) AS spk_dateline,
+                    MAX(spk_divisi) AS spk_divisi,
+                    MAX(spk_perush_kode) AS spk_perush_kode,
+                    MAX(spk_cus_kode) AS spk_cus_kode,
+                    MAX(spk_workshop) AS spk_workshop,
+                    MAX(spk_statuskerja) AS spk_statuskerja,
+                    GROUP_CONCAT(DISTINCT spk_keterangan SEPARATOR '\n') AS spk_keterangan,
+                    MAX(spk_pending) AS spk_pending,
+                    MAX(spk_close) AS spk_close,
+                    MAX(user_create) AS user_create,
+                    MAX(user_modified) AS user_modified,
+                    MAX(date_create) AS date_create,
+                    MAX(date_modified) AS date_modified
+                FROM tspk
+                WHERE COALESCE(spk_pen_nomor, '') <> ''
+                GROUP BY spk_pen_nomor, spk_pen_id
+            ) sp
+                ON sp.spk_pen_nomor = h.pen_nomor
+               AND sp.spk_pen_id = d.pend_id
             WHERE h.pen_nomor = ?
               ${ownerFilterSql}
             ORDER BY d.pend_urutan, d.pend_id
@@ -346,7 +386,113 @@ const getTrackingPenawaranDetailByNoPenawaran = async (req, res) => {
     }
 };
 
+const getTrackingPenawaranStatusCounts = async (req, res) => {
+    try {
+        const managerRole = isManagerUser(req);
+        const authSalesKode = getAuthSalesKode(req);
+        if (!managerRole && !authSalesKode) {
+            return res.status(403).json({
+                success: false,
+                message: "Sales tidak valid (sales_kode kosong)",
+            });
+        }
+
+        const monthRange = getCurrentMonthRange();
+        const startDate =
+            normalizeDate(req.query.startDate) || monthRange.start;
+        const endDate = normalizeDate(req.query.endDate) || monthRange.end;
+
+        const params = [startDate, endDate];
+        if (!managerRole) {
+            params.unshift(authSalesKode);
+        }
+
+        const ownerFilterSql = managerRole
+            ? ""
+            : "COALESCE(h.pen_sal_kode, '') = ? AND ";
+
+        const [rows] = await db.query(
+            `
+            SELECT 
+                status_tracking,
+                COUNT(*) AS jumlah
+            FROM (
+                SELECT
+                    h.pen_nomor,
+                    CASE 
+                        WHEN COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = 0 THEN 'OPEN'
+                        WHEN COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = COUNT(DISTINCT d.pend_id) THEN 'CLOSE'
+                        ELSE 'PARSIAL'
+                    END AS status_tracking
+                FROM tpenawaran_hdr h
+                INNER JOIN tpenawaran_dtl d
+                    ON d.pend_pen_nomor = h.pen_nomor
+                LEFT JOIN tmemospk m
+                    ON m.mspk_pen_nomor = h.pen_nomor
+                   AND m.mspk_pen_id = d.pend_id
+                LEFT JOIN (
+                    SELECT 
+                        spk_pen_nomor,
+                        spk_pen_id,
+                        GROUP_CONCAT(DISTINCT spk_nomor SEPARATOR ', ') AS spk_nomor,
+                        MAX(spk_nama) AS spk_nama,
+                        MIN(spk_tanggal) AS spk_tanggal,
+                        MAX(spk_dateline) AS spk_dateline,
+                        MAX(spk_divisi) AS spk_divisi,
+                        MAX(spk_perush_kode) AS spk_perush_kode,
+                        MAX(spk_cus_kode) AS spk_cus_kode,
+                        MAX(spk_workshop) AS spk_workshop,
+                        MAX(spk_statuskerja) AS spk_statuskerja,
+                        GROUP_CONCAT(DISTINCT spk_keterangan SEPARATOR '\n') AS spk_keterangan,
+                        MAX(spk_pending) AS spk_pending,
+                        MAX(spk_close) AS spk_close,
+                        MAX(user_create) AS user_create,
+                        MAX(user_modified) AS user_modified,
+                        MAX(date_create) AS date_create,
+                        MAX(date_modified) AS date_modified
+                    FROM tspk
+                    WHERE COALESCE(spk_pen_nomor, '') <> ''
+                    GROUP BY spk_pen_nomor, spk_pen_id
+                ) sp
+                    ON sp.spk_pen_nomor = h.pen_nomor
+                   AND sp.spk_pen_id = d.pend_id
+                WHERE ${ownerFilterSql}h.pen_tanggal >= ?
+                  AND h.pen_tanggal <= ?
+                GROUP BY h.pen_nomor
+            ) t
+            GROUP BY status_tracking
+            `,
+            params,
+        );
+
+        const statusMap = {
+            OPEN: 0,
+            PARSIAL: 0,
+            CLOSE: 0
+        };
+
+        for (const row of rows || []) {
+            const statusKey = String(row?.status_tracking || "").trim().toUpperCase();
+            if (statusKey in statusMap) {
+                statusMap[statusKey] = Number(row?.jumlah || 0);
+            }
+        }
+
+        return res.json({
+            success: true,
+            data: statusMap
+        });
+    } catch (err) {
+        console.error("GET TRACKING PENAWARAN STATUS COUNTS ERROR:", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message || "Gagal mengambil status counts penawaran",
+        });
+    }
+};
+
 module.exports = {
     getTrackingPenawaranList,
     getTrackingPenawaranDetailByNoPenawaran,
+    getTrackingPenawaranStatusCounts,
 };

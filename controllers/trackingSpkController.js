@@ -1,33 +1,10 @@
 const db = require("../config/dbPenawaran");
-
-const normalizeDate = (value) => {
-    if (!value) return null;
-    const s = String(value).trim().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-    return s;
-};
-
-const getCurrentMonthRange = () => {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-    const toYmd = (d) => {
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        return `${yyyy}-${mm}-${dd}`;
-    };
-
-    return { start: toYmd(start), end: toYmd(end) };
-};
-
-const isManagerUser = (req) =>
-    String(req.user?.jabatan || "")
-        .trim()
-        .toUpperCase() === "MANAGER";
-
-const getAuthSalesKode = (req) => String(req.user?.sales_kode || "").trim();
+const {
+    normalizeDate,
+    getCurrentMonthRange,
+    isManagerUser,
+    getAuthSalesKode,
+} = require("../utils/trackingHelper");
 
 const getTrackingSpkList = async (req, res) => {
     try {
@@ -47,11 +24,6 @@ const getTrackingSpkList = async (req, res) => {
         const endDate = normalizeDate(req.query.endDate) || monthRange.end;
         const search = String(req.query.search || "").trim();
         const filterStatus = String(req.query.filterStatus || "").trim().toLowerCase();
-        const limit = Math.min(
-            Math.max(Number(req.query.limit) || 100, 1),
-            300,
-        );
-
         const params = [startDate, endDate];
         let ownerFilterSql = "";
         if (!managerRole) {
@@ -80,8 +52,6 @@ const getTrackingSpkList = async (req, res) => {
             params.push(like, like);
         }
 
-        params.push(limit);
-
         const [dbRows] = await db.query(
             `
             SELECT
@@ -100,7 +70,6 @@ const getTrackingSpkList = async (req, res) => {
               ${searchSql}
               ${filterStatusSql}
             ORDER BY s.spk_tanggal DESC, s.spk_nomor DESC
-            LIMIT ?
             `,
             params,
         );
@@ -164,6 +133,80 @@ const getTrackingSpkList = async (req, res) => {
     }
 };
 
+const getTrackingSpkStatusCounts = async (req, res) => {
+    try {
+        const managerRole = isManagerUser(req);
+        const authSalesKode = getAuthSalesKode(req);
+        if (!managerRole && !authSalesKode) {
+            return res.status(403).json({
+                success: false,
+                message: "Sales tidak valid (sales_kode kosong)",
+            });
+        }
+
+        const monthRange = getCurrentMonthRange();
+        const startDate =
+            normalizeDate(req.query.startDate) || monthRange.start;
+        const endDate = normalizeDate(req.query.endDate) || monthRange.end;
+
+        const params = [startDate, endDate];
+        let ownerFilterSql = "";
+        if (!managerRole) {
+            ownerFilterSql = "AND COALESCE(s.spk_sal_kode, '') = ?";
+            params.push(authSalesKode);
+        }
+
+        const [rows] = await db.query(
+            `
+            SELECT 
+                status_tracking,
+                COUNT(*) AS jumlah
+            FROM (
+                SELECT
+                    s.spk_nomor,
+                    CASE 
+                        WHEN COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) = 0 THEN 'BELUM'
+                        WHEN COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) >= s.spk_jumlah THEN 'SUDAH'
+                        ELSE 'PROSES'
+                    END AS status_tracking
+                FROM tspk s
+                WHERE s.spk_tanggal >= ?
+                  AND s.spk_tanggal <= ?
+                  AND COALESCE(s.spk_divisi, '') NOT IN ('3', '6')
+                  ${ownerFilterSql}
+            ) t
+            GROUP BY status_tracking
+            `,
+            params,
+        );
+
+        const statusMap = {
+            BELUM: 0,
+            PROSES: 0,
+            SUDAH: 0
+        };
+
+        for (const row of rows || []) {
+            const statusKey = String(row?.status_tracking || "").trim().toUpperCase();
+            if (statusKey in statusMap) {
+                statusMap[statusKey] = Number(row?.jumlah || 0);
+            }
+        }
+
+        return res.json({
+            success: true,
+            data: statusMap
+        });
+    } catch (err) {
+        console.error("GET TRACKING SPK STATUS COUNTS ERROR:", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message || "Gagal mengambil status counts SPK",
+        });
+    }
+};
+
 module.exports = {
     getTrackingSpkList,
+    getTrackingSpkStatusCounts,
 };

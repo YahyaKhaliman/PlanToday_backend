@@ -9,6 +9,8 @@ const pool = mysql.createPool({
     port: process.env.DB_PORT_ACH,
     waitForConnections: true,
     connectionLimit: 10,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
 });
 
 module.exports = pool;

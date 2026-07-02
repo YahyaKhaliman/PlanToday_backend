@@ -13,6 +13,19 @@ const parseIntOrNull = (v) => {
 
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
+const parseYmToInt = (v) => {
+    if (!v) return null;
+    const s = String(v).trim();
+    const match = s.match(/^(\d{4})-(\d{1,2})$/);
+    if (!match) {
+        if (/^\d{6}$/.test(s)) return parseInt(s, 10);
+        return null;
+    }
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    return year * 100 + month;
+};
+
 const normalizeRange = (fromYear, fromMonth, toYear, toMonth) => {
     const now = new Date();
     let fy = fromYear ?? now.getFullYear();
@@ -210,21 +223,44 @@ const getOmsetByMonth = async (req, res) => {
                 message: "kode tidak terdeteksi",
             });
 
-        const [nameRows] = await db.query(
-            `SELECT MAX(nama) AS nama
-        FROM ${process.env.DB_NAME_ACH}.v_mkt_omset
-        WHERE kode = ?`,
-            [kode],
-        );
+        // Deteksi apakah kode merupakan CMO atau berjabatan CMO di tsales
+        let isCMO = (kode === "CMO");
+        if (!isCMO) {
+            const [salesRows] = await db.query(
+                `SELECT sal_jabatan FROM ${process.env.DB_NAME_PENAWARAN}.tsales WHERE sal_kode = ? LIMIT 1`,
+                [kode]
+            );
+            if (salesRows?.[0]?.sal_jabatan === "CMO") {
+                isCMO = true;
+            }
+        }
 
-        const nama = nameRows?.[0]?.nama || null;
+        let nama = null;
+        if (isCMO) {
+            nama = "CMO";
+        } else {
+            const [nameRows] = await db.query(
+                `SELECT MAX(nama) AS nama
+                 FROM ${process.env.DB_NAME_ACH}.v_mkt_omset
+                 WHERE kode = ?`,
+                [kode],
+            );
+            nama = nameRows?.[0]?.nama || null;
+        }
 
         const year = parseYear(req.query.year);
         const fromInt = parseYmToInt(req.query.from);
         const toInt = parseYmToInt(req.query.to);
 
-        let where = `WHERE kode = ?`;
-        const params = [kode];
+        let where = "";
+        const params = [];
+
+        if (isCMO) {
+            where = `WHERE kode IN (SELECT sal_kode FROM ${process.env.DB_NAME_PENAWARAN}.tsales WHERE sal_jabatan = 'CMO')`;
+        } else {
+            where = `WHERE kode = ?`;
+            params.push(kode);
+        }
 
         if (fromInt && toInt) {
             where += ` AND (tahun*100 + bulan) BETWEEN ? AND ?`;
@@ -251,11 +287,59 @@ const getOmsetByMonth = async (req, res) => {
 
         const [rows] = await db.query(sql, params);
 
+        const dataWithSpk = await Promise.all(
+            rows.map(async (row) => {
+                let salesFilterSql = "";
+                let queryParams = [];
+
+                if (isCMO) {
+                    salesFilterSql = `AND s.spk_sal_kode IN (SELECT sal_kode FROM ${process.env.DB_NAME_PENAWARAN}.tsales WHERE sal_jabatan IN ('MO', 'CMO'))`;
+                    queryParams = [row.tahun, row.bulan];
+                } else {
+                    salesFilterSql = `AND s.spk_sal_kode = ?`;
+                    queryParams = [kode, row.tahun, row.bulan];
+                }
+
+                const [spkRows] = await db.query(
+                    `SELECT
+                        s.spk_nomor,
+                        DATE_FORMAT(s.spk_tanggal, '%Y-%m-%d') AS spk_tanggal,
+                        s.spk_cus_kode,
+                        c.cus_nama AS customer_nama,
+                        s.spk_divisi,
+                        s.spk_tipe,
+                        s.spk_nama,
+                        s.spk_jumlah,
+                        s.spk_harga,
+                        (IFNULL(s.spk_jumlah, 0) * IFNULL(s.spk_harga, 0)) AS nilai,
+                        COALESCE(s.spk_close, 0) AS spk_close
+                    FROM ${process.env.DB_NAME_PENAWARAN}.tspk s
+                    LEFT JOIN ${process.env.DB_NAME_PENAWARAN}.tcustomer c ON c.cus_kode = s.spk_cus_kode
+                    WHERE s.spk_aktif = 'Y'
+                      AND s.spk_divisi IN (1, 4, 5)
+                      ${salesFilterSql}
+                      AND YEAR(s.spk_tanggal) = ?
+                      AND MONTH(s.spk_tanggal) = ?
+                    ORDER BY s.spk_tanggal ASC, s.spk_nomor ASC`,
+                    queryParams
+                );
+
+                const nominal_spk = spkRows.reduce((sum, item) => sum + Number(item.nilai || 0), 0);
+
+                return {
+                    ...row,
+                    total_spk: spkRows.length,
+                    nominal_spk: nominal_spk,
+                    detail_spk: spkRows,
+                };
+            })
+        );
+
         return res.status(200).json({
             success: true,
             nama: nama,
             group: "month",
-            data: rows,
+            data: dataWithSpk,
         });
     } catch (err) {
         console.error("GET OMSET BY MONTH:", err);
@@ -444,7 +528,7 @@ const getSpkOmsetByMonth = async (req, res) => {
             req.user?.sal_kode ||
             req.user?.kode_sales ||
             req.user?.spk_sal_kode;
-        const kode = isManager ? req.params.kode : kodeFromUser;
+        const kode = isManager ? (req.params.id || req.params.kode) : kodeFromUser;
 
         if (!kode) {
             return res.status(400).json({
@@ -453,12 +537,38 @@ const getSpkOmsetByMonth = async (req, res) => {
             });
         }
 
+        // Deteksi apakah kode merupakan CMO atau berjabatan CMO di tsales
+        let isCMO = (kode === "CMO");
+        if (!isCMO) {
+            const [salesRows] = await db.query(
+                `SELECT sal_jabatan FROM ${process.env.DB_NAME_PENAWARAN}.tsales WHERE sal_kode = ? LIMIT 1`,
+                [kode]
+            );
+            if (salesRows?.[0]?.sal_jabatan === "CMO") {
+                isCMO = true;
+            }
+        }
+
         const page = Math.max(1, Number(req.query.page || 1));
         const limit = Math.min(
             100,
             Math.max(10, Number(req.query.limit || 20)),
         );
         const offset = (page - 1) * limit;
+
+        let salesFilterSql = "";
+        let listParams = [];
+        let summaryParams = [];
+
+        if (isCMO) {
+            salesFilterSql = `AND spk_sal_kode IN (SELECT sal_kode FROM ${process.env.DB_NAME_PENAWARAN}.tsales WHERE sal_jabatan IN ('MO', 'CMO'))`;
+            listParams = [tahun, bulan, limit, offset];
+            summaryParams = [tahun, bulan];
+        } else {
+            salesFilterSql = `AND spk_sal_kode = ?`;
+            listParams = [kode, tahun, bulan, limit, offset];
+            summaryParams = [kode, tahun, bulan];
+        }
 
         const sqlList = `
         SELECT
@@ -470,11 +580,12 @@ const getSpkOmsetByMonth = async (req, res) => {
             spk_nama,
             spk_jumlah,
             spk_harga,
-            (IFNULL(spk_jumlah,0) * IFNULL(spk_harga,0)) AS nilai
+            (IFNULL(spk_jumlah,0) * IFNULL(spk_harga,0)) AS nilai,
+            COALESCE(spk_close, 0) AS spk_close
         FROM ${process.env.DB_NAME_PENAWARAN}.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
-            AND spk_sal_kode = ?
+            ${salesFilterSql}
             AND YEAR(spk_tanggal) = ?
             AND MONTH(spk_tanggal) = ?
         ORDER BY spk_tanggal ASC, spk_nomor ASC
@@ -492,19 +603,13 @@ const getSpkOmsetByMonth = async (req, res) => {
         FROM ${process.env.DB_NAME_PENAWARAN}.tspk
         WHERE spk_aktif='Y'
             AND spk_divisi IN (1,4,5)
-            AND spk_sal_kode = ?
+            ${salesFilterSql}
             AND YEAR(spk_tanggal) = ?
             AND MONTH(spk_tanggal) = ?;
         `;
 
-        const [rows] = await db.query(sqlList, [
-            kode,
-            tahun,
-            bulan,
-            limit,
-            offset,
-        ]);
-        const [sumRows] = await db.query(sqlSummary, [kode, tahun, bulan]);
+        const [rows] = await db.query(sqlList, listParams);
+        const [sumRows] = await db.query(sqlSummary, summaryParams);
         const summary = sumRows?.[0] || {
             total_spk: 0,
             total_realisasi: 0,

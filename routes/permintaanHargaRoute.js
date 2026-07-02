@@ -8,6 +8,11 @@ const controller = require("../controllers/permintaanHargaController");
 
 router.get("/permintaan-harga", auth, controller.getPermintaanHargaList);
 router.get(
+    "/permintaan-harga/status-counts",
+    auth,
+    controller.getPermintaanHargaStatusCounts,
+);
+router.get(
     "/permintaan-harga/:nomor",
     auth,
     controller.getPermintaanHargaDetail,

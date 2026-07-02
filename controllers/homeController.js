@@ -423,7 +423,7 @@ const visitPlanById = async (req, res) => {
             c.cus_alamat AS cc_alamat,
             c.cus_kota AS cc_kota
         FROM tkunjungan k
-        LEFT JOIN v_customer c ON c.cus_kode = k.cus_kode
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         WHERE k.user = ?
             AND DATE(k.tanggal_plan) = ?
             AND k.cus_kode = ?
@@ -692,7 +692,7 @@ const getVisitFromPlan = async (req, res) => {
             c.cus_alamat AS cc_alamat,
             c.cus_kota AS cc_kota
         FROM tkunjungan k
-        LEFT JOIN v_customer c ON c.cus_kode = k.cus_kode
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         WHERE k.user = ?
             AND k.cus_kode = ?
             AND DATE(k.tanggal_plan) = ?
@@ -905,7 +905,7 @@ const getRekapVisit = async (req, res) => {
                 ELSE CONCAT(?, CAST(a.foto AS CHAR(255)))
             END AS foto_url
             FROM tkunjungan a
-            LEFT JOIN v_customer b ON b.cus_kode = a.cus_kode
+            LEFT JOIN kencanaprint.tcustomer b ON b.cus_kode = a.cus_kode
             LEFT JOIN tkaryawan k ON k.kar_nama = a.user AND k.kar_isaktif = 1
             WHERE a.user = ?
             AND a.realisasi = 'Y'
@@ -990,7 +990,7 @@ const rekapVisitWA = async (req, res) => {
             ka.kar_cabang AS user_cabang
         FROM tkunjungan ku
         INNER JOIN tkaryawan ka ON ka.kar_nama = ku.user
-        INNER JOIN v_customer ca ON ca.cus_kode = ku.cus_kode
+        INNER JOIN kencanaprint.tcustomer ca ON ca.cus_kode = ku.cus_kode
         WHERE ku.user = ?
             AND ku.realisasi = 'Y'
             AND DATE(ku.tanggal) >= ?
@@ -1080,66 +1080,118 @@ const logRekapDebug = (tag, payload) => {
 
 // Get Rekap visit plan
 const getRekapVisitPlan = async (req, res) => {
-    const { user, cabang, tanggal_awal, tanggal_akhir } = req.query;
+    const { user, cabang, tanggal_awal, tanggal_akhir, is_manager } = req.query;
 
-    if (!user || !tanggal_awal || !tanggal_akhir) {
+    if (!tanggal_awal || !tanggal_akhir) {
         return res.status(400).json({
             success: false,
-            message: "Parameter user, tanggal_awal, tanggal_akhir wajib diisi",
+            message: "Parameter tanggal_awal dan tanggal_akhir wajib diisi",
         });
     }
 
     try {
         const PUBLIC_BASE_URL =
             process.env.PUBLIC_BASE_URL || getPublicBaseUrl(req);
-        let sql = `
-        WITH pick AS (
+        const isManagerMode = is_manager === "true";
+
+        let sql = "";
+        let params = [];
+
+        if (isManagerMode) {
+            sql = `
+            WITH pick AS (
+                SELECT
+                    cus_kode,
+                    DATE(tanggal_plan) AS tgl,
+                    user,
+                    MAX(id) AS pick_id
+                FROM tkunjungan
+                WHERE DATE(tanggal_plan) BETWEEN ? AND ?
+                GROUP BY cus_kode, DATE(tanggal_plan), user
+            )
             SELECT
-                cus_kode,
-                DATE(tanggal_plan) AS tgl,
-                MAX(id) AS pick_id
-            FROM tkunjungan
-            WHERE user = ?
-                AND DATE(tanggal_plan) BETWEEN ? AND ?
-            GROUP BY cus_kode, DATE(tanggal_plan)
-        )
-        SELECT
-            k.id,
-            DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
-            DATE_FORMAT(k.tanggal, '%Y-%m-%d') AS tanggal,
-            k.cus_kode,
-            k.note,
-            k.catatan,
-            k.realisasi,
-            k.latitude,
-            k.longitude,
-            CAST(k.foto AS CHAR(255)) AS foto,
-            CASE
-                WHEN k.foto IS NULL OR CAST(k.foto AS CHAR(255)) = '' THEN NULL
-                WHEN CAST(k.foto AS CHAR(255)) LIKE 'http%' THEN CAST(k.foto AS CHAR(255))
-                ELSE CONCAT(?, CAST(k.foto AS CHAR(255)))
-            END AS foto_url,
-            c.cus_nama AS cc_nama,
-            c.cus_alamat AS cc_alamat,
-            c.cus_kota AS cc_kota
-        FROM pick p
-        JOIN tkunjungan k ON k.id = p.pick_id
-        LEFT JOIN v_customer c ON c.cus_kode = k.cus_kode
-        INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
-        WHERE k.user = ?
-        `;
+                k.id,
+                DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
+                DATE_FORMAT(k.tanggal, '%Y-%m-%d') AS tanggal,
+                k.cus_kode,
+                k.note,
+                k.catatan,
+                k.realisasi,
+                k.latitude,
+                k.longitude,
+                k.user AS sales_name,
+                CAST(k.foto AS CHAR(255)) AS foto,
+                CASE
+                    WHEN k.foto IS NULL OR CAST(k.foto AS CHAR(255)) = '' THEN NULL
+                    WHEN CAST(k.foto AS CHAR(255)) LIKE 'http%' THEN CAST(k.foto AS CHAR(255))
+                    ELSE CONCAT(?, CAST(k.foto AS CHAR(255)))
+                END AS foto_url,
+                c.cus_nama AS cc_nama,
+                c.cus_alamat AS cc_alamat,
+                c.cus_kota AS cc_kota
+            FROM pick p
+            JOIN tkunjungan k ON k.id = p.pick_id
+            LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
+            INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
+            WHERE ka.kar_jabatan = 'SALES'
+            `;
+            params = [tanggal_awal, tanggal_akhir, PUBLIC_BASE_URL];
+        } else {
+            if (!user) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Parameter user wajib diisi untuk mode non-manager",
+                });
+            }
+            sql = `
+            WITH pick AS (
+                SELECT
+                    cus_kode,
+                    DATE(tanggal_plan) AS tgl,
+                    MAX(id) AS pick_id
+                FROM tkunjungan
+                WHERE user = ?
+                    AND DATE(tanggal_plan) BETWEEN ? AND ?
+                GROUP BY cus_kode, DATE(tanggal_plan)
+            )
+            SELECT
+                k.id,
+                DATE_FORMAT(k.tanggal_plan, '%Y-%m-%d') AS tanggal_plan,
+                DATE_FORMAT(k.tanggal, '%Y-%m-%d') AS tanggal,
+                k.cus_kode,
+                k.note,
+                k.catatan,
+                k.realisasi,
+                k.latitude,
+                k.longitude,
+                k.user AS sales_name,
+                CAST(k.foto AS CHAR(255)) AS foto,
+                CASE
+                    WHEN k.foto IS NULL OR CAST(k.foto AS CHAR(255)) = '' THEN NULL
+                    WHEN CAST(k.foto AS CHAR(255)) LIKE 'http%' THEN CAST(k.foto AS CHAR(255))
+                    ELSE CONCAT(?, CAST(k.foto AS CHAR(255)))
+                END AS foto_url,
+                c.cus_nama AS cc_nama,
+                c.cus_alamat AS cc_alamat,
+                c.cus_kota AS cc_kota
+            FROM pick p
+            JOIN tkunjungan k ON k.id = p.pick_id
+            LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
+            INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
+            WHERE k.user = ?
+            `;
+            params = [
+                user,
+                tanggal_awal,
+                tanggal_akhir,
+                PUBLIC_BASE_URL,
+                user,
+            ];
 
-        const params = [
-            user,
-            tanggal_awal,
-            tanggal_akhir,
-            PUBLIC_BASE_URL,
-            user,
-        ];
-
-        if (cabang) {
-            sql += ` AND ka.kar_cabang = ?`;
-            params.push(cabang);
+            if (cabang) {
+                sql += ` AND ka.kar_cabang = ?`;
+                params.push(cabang);
+            }
         }
 
         sql += ` ORDER BY DATE(k.tanggal_plan) DESC, k.id DESC`;
@@ -1149,6 +1201,7 @@ const getRekapVisitPlan = async (req, res) => {
             user,
             tanggal_awal,
             tanggal_akhir,
+            is_manager,
             total: rows?.length || 0,
         });
         return res.json({ success: true, data: rows || [] });
@@ -1234,7 +1287,7 @@ const rekapVisitPlanWA = async (req, res) => {
             AND DATE(t.tanggal_plan) <= ?
         GROUP BY t.user, DATE(t.tanggal_plan), t.cus_kode
         ) p ON p.pick_id = k.id
-        LEFT JOIN v_customer c ON c.cus_kode = k.cus_kode
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         LEFT JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
     `;

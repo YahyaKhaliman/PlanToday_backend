@@ -9,6 +9,11 @@ router.get(
     trackingPenawaranController.getTrackingPenawaranList,
 );
 router.get(
+    "/tracking-penawaran/status-counts",
+    auth,
+    trackingPenawaranController.getTrackingPenawaranStatusCounts,
+);
+router.get(
     "/tracking-penawaran/detail",
     auth,
     trackingPenawaranController.getTrackingPenawaranDetailByNoPenawaran,

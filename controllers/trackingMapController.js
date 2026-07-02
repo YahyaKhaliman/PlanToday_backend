@@ -1,33 +1,11 @@
 const db = require("../config/dbPenawaran");
+const {
+    normalizeDate,
+    getCurrentMonthRange,
+    isManagerUser,
+    getAuthSalesKode,
+} = require("../utils/trackingHelper");
 
-const normalizeDate = (value) => {
-    if (!value) return null;
-    const s = String(value).trim().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-    return s;
-};
-
-const getCurrentMonthRange = () => {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-    const toYmd = (d) => {
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        return `${yyyy}-${mm}-${dd}`;
-    };
-
-    return { start: toYmd(start), end: toYmd(end) };
-};
-
-const isManagerUser = (req) =>
-    String(req.user?.jabatan || "")
-        .trim()
-        .toUpperCase() === "MANAGER";
-
-const getAuthSalesKode = (req) => String(req.user?.sales_kode || "").trim();
 
 const getTrackingMapList = async (req, res) => {
     try {
@@ -53,7 +31,7 @@ const getTrackingMapList = async (req, res) => {
         const params = [startDate, endDate];
         let ownerFilterSql = "";
         if (!managerRole) {
-            ownerFilterSql = "AND COALESCE(h.pen_sal_kode, '') = ?";
+            ownerFilterSql = "AND COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '') = ?";
             params.push(authSalesKode);
         }
 
@@ -105,12 +83,13 @@ const getTrackingMapList = async (req, res) => {
                 MAX(COALESCE(m.mspk_ukuran, '')) AS mspk_ukuran,
                 MAX(COALESCE(m.mspk_kain, '')) AS mspk_kain,
                 MAX(COALESCE(m.mspk_finishing, '')) AS mspk_finishing,
-                MAX(COALESCE(m.mspk_keterangan, '')) AS mspk_keterangan
+                MAX(COALESCE(m.mspk_keterangan, '')) AS mspk_keterangan,
+                MAX(COALESCE(s.sal_nama, '')) AS sales
             FROM tmemospk m
-            INNER JOIN tpenawaran_hdr h
+            LEFT JOIN tpenawaran_hdr h
                 ON h.pen_nomor = m.mspk_pen_nomor
             LEFT JOIN tsales s
-                ON s.sal_kode = h.pen_sal_kode
+                ON s.sal_kode = COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '')
             LEFT JOIN tcustomer ch
                 ON ch.cus_kode = h.pen_cus_kode
             LEFT JOIN tcustomer cm
@@ -147,7 +126,7 @@ const getTrackingMapList = async (req, res) => {
         const filterParams = [startDate, endDate];
         let filterOwnerSql = "";
         if (!managerRole) {
-            filterOwnerSql = "AND COALESCE(h.pen_sal_kode, '') = ?";
+            filterOwnerSql = "AND COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '') = ?";
             filterParams.push(authSalesKode);
         }
 
@@ -156,8 +135,8 @@ const getTrackingMapList = async (req, res) => {
             SELECT DISTINCT
                 COALESCE(s.sal_nama, '') AS sales
             FROM tmemospk m
-            INNER JOIN tpenawaran_hdr h ON h.pen_nomor = m.mspk_pen_nomor
-            LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
+            LEFT JOIN tpenawaran_hdr h ON h.pen_nomor = m.mspk_pen_nomor
+            LEFT JOIN tsales s ON s.sal_kode = COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '')
             WHERE m.mspk_tanggal >= ? AND m.mspk_tanggal <= ?
               AND COALESCE(m.mspk_divisi, '') NOT IN ('3', '6')
               ${filterOwnerSql}
