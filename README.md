@@ -74,36 +74,36 @@ Buat file bernama `.env` di root folder backend (duplikat dari `.env` yang ada) 
 
 ```env
 # 1. Konfigurasi Database Utama (marketing)
-DB_HOST_MAIN=103.94.238.252
-DB_USER_MAIN=root
-DB_PASSWORD_MAIN='Password_Anda'
+DB_HOST_MAIN=localhost
+DB_USER_MAIN=your_db_user
+DB_PASSWORD_MAIN='your_db_password'
 DB_NAME_MAIN=marketing
 DB_PORT_MAIN=3306
 
 # 2. Konfigurasi Database KPI & Achievement
-DB_HOST_ACH=103.94.238.252
-DB_USER_ACH=edp
-DB_PASSWORD_ACH='Password_Anda'
+DB_HOST_ACH=localhost
+DB_USER_ACH=your_db_user
+DB_PASSWORD_ACH='your_db_password'
 DB_NAME_ACH=kpi
 DB_PORT_ACH=3306
 
 # 3. Konfigurasi Database Penawaran (kencanaprint)
-DB_HOST_PENAWARAN=103.94.238.252
-DB_USER_PENAWARAN=root
-DB_PASSWORD_PENAWARAN='Password_Anda'
+DB_HOST_PENAWARAN=localhost
+DB_USER_PENAWARAN=your_db_user
+DB_PASSWORD_PENAWARAN='your_db_password'
 DB_NAME_PENAWARAN=kencanaprint
 DB_PORT_PENAWARAN=3306
 
 # 4. Port Server & Rahasia JWT
 PORT=3001
-JWT_SECRET=plantoday
+JWT_SECRET=your_super_secret_jwt_key
 
 # 5. Direktori Penyimpanan Gambar Upload
 # Mode Produksi VPS (Linux):
 IMAGE_UPLOAD_DIR=/mnt/image/mintaharga
 
 # Mode Lokal Windows (Uncomment baris bawah jika di lokal, dan comment baris Linux atas):
-# IMAGE_UPLOAD_DIR=\\103.94.238.252\image\mintaharga
+# IMAGE_UPLOAD_DIR=\\YOUR_SERVER_IP\image\mintaharga
 # Atau gunakan folder lokal: IMAGE_UPLOAD_DIR=./uploads/images
 ```
 
