@@ -1,168 +1,246 @@
 # PlanToday - REST API Backend Server
 
-Backend PlanToday adalah layanan REST API server yang dibangun menggunakan **Express.js (Node.js)**. Server ini berfungsi sebagai jembatan data untuk aplikasi mobile PlanToday dengan mengintegrasikan logika bisnis ke tiga database MySQL yang berbeda.
+Backend PlanToday adalah layanan REST API server yang dibangun menggunakan **Express.js (Node.js)**. Server ini bertindak sebagai pusat logika bisnis dan jembatan data untuk aplikasi mobile client PlanToday, dengan mengintegrasikan 3 database MySQL yang terpisah.
 
 ---
 
 ## 🛠️ Tech Stack & Dependensi Utama
 
-- **Core Framework**: Express.js (v5.2.1)
-- **Runtime**: Node.js (versi >= 20)
-- **Database Driver**: `mysql2/promise` (menggunakan Connection Pool)
-- **Keamanan**:
-  - `jsonwebtoken` (JWT) untuk manajemen sesi & otorisasi token.
-  - `bcryptjs` (untuk enkripsi data bila diperlukan).
-- **Manajemen File**:
-  - `multer` untuk mengunggah gambar bukti fisik kunjungan, kurir, dan permintaan harga.
-  - `sharp` untuk kompresi dan manipulasi gambar sebelum disimpan.
-- **Development Tool**: `nodemon` (auto-reload server saat ada perubahan kode).
+- **Core Framework**: Express.js (v5.x)
+- **Runtime**: Node.js (versi `>= 20`)
+- **Database Driver**: `mysql2/promise` (Connection Pooling)
+- **Keamanan & Autentikasi**:
+  - `jsonwebtoken` (JWT) untuk sesi token tanpa state (stateless authentication).
+  - `bcryptjs` untuk utilitas enkripsi.
+- **Manajemen File & Gambar**:
+  - `multer` untuk multipart upload (foto kunjungan, bukti pengiriman kurir, gambar sampel permintaan harga).
+  - `sharp` untuk kompresi, rotasi otomatis, dan optimasi gambar.
+- **Utilitas**: `cors`, `dotenv`, `nodemon` (development).
 
 ---
 
-## 🗄️ Arsitektur Multi-Database
+## 🗄️ Database & Hubungan (Relasi) Antar Tabel
 
-Server ini terhubung ke tiga database MySQL terpisah untuk membagi fungsionalitas sistem:
+Sistem PlanToday menggunakan **3 database terpisah** agar data tersusun rapi sesuai fungsinya:
+1. **Database Utama (`marketing`)**: Mengurus data karyawan, data pelanggan, kunjungan sales, dan kurir.
+2. **Database KPI (`database_kpi`)**: Mengurus data target penjualan dan rapor pencapaian sales.
+3. **Database Penawaran & Produksi (`database_penawaran`)**: Mengurus permintaan harga, surat penawaran, hingga status produksi pesanan pabrik.
 
-1. **Main Database (`marketing`)** - Config: [config/dbMain.js](file:///d:/Coding/PlanToday-backend/config/dbMain.js)
-   - Digunakan untuk data pengguna/karyawan (`tkaryawan`), logs login (`log_plantoday`), data calon customer, kunjungan sales (visit plan/record), serta data master kurir.
-2. **ACH Database (`database_kpi`)** - Config: [config/dbAch.js](file:///d:/Coding/PlanToday-backend/config/dbAch.js)
-   - Digunakan untuk mengelola data visual pencapaian sales, target omset bulanan/tahunan, serta data realisasi performa sales.
-3. **Penawaran Database (`database_penawaran`)** - Config: [config/dbPenawaran.js](file:///d:/Coding/PlanToday-backend/config/dbPenawaran.js)
-   - Digunakan untuk mengelola pembuatan penawaran harga (quotation), status progress approval penawaran, daftar SPK, serta riwayat pelacakan penawaran cetak.
+```mermaid
+graph TD
+    Client["📱 Aplikasi Mobile PlanToday"] -->|Kirim / Minta Data| Server["🖥️ Server Backend Express.js"]
+
+    Server --> DB1[("1. Database Utama (marketing)")]
+    Server --> DB2[("2. Database KPI (database_kpi)")]
+    Server --> DB3[("3. Database Penawaran (database_penawaran)")]
+
+    subgraph "Isi Database Utama (marketing)"
+        DB1 --- T1["tkaryawan (Data Akun & Login)"]
+        DB1 --- T2["log_plantoday (Catatan Riwayat Login)"]
+        DB1 --- T3["tcustomer (Buku Kontak / Data Pelanggan)"]
+        DB1 --- T4["tvisit_plan & tvisit (Rencana & Hasil Kunjungan Sales)"]
+        DB1 --- T5["tkurir & tpengiriman (Data Tugas Pengiriman Kurir)"]
+    end
+
+    subgraph "Isi Database KPI (database_kpi)"
+        DB2 --- T6["target_omset (Target Jual Bulanan/Tahunan)"]
+        DB2 --- T7["realisasi_omset (Hasil Omset Penjualan Riil)"]
+    end
+
+    subgraph "Isi Database Penawaran & Produksi (database_penawaran)"
+        DB3 --- T8["tmintaharga (Formulir Permintaan Harga Cetak)"]
+        DB3 --- T9["tpenawaran_hdr & tpenawaran_dtl (Surat Penawaran Resmi & Rincian Barang)"]
+        DB3 --- T10["tperusahaan (Nama Badan Usaha / Kop Surat)"]
+        DB3 --- T11["tspk (Surat Perintah Kerja Pabrik)"]
+        DB3 --- T12["tjadwalkirim, tplan_ppic_dtl2, tsj_hdr, tsj_dtl (Jadwal Pabrik & Surat Jalan)"]
+        DB3 --- T13["tmemospk (Pelacakan Tahapan Kerja Pesanan)"]
+    end
+```
 
 ---
 
-## 📂 Struktur Folder Proyek
+### 📖 Cerita Relasi (Hubungan) Antar Tabel Secara Sederhana
+
+Agar mudah dipahami oleh pengguna umum, berikut adalah gambaran bagaimana tabel-tabel di atas saling terhubung dalam aktivitas kerja sehari-hari:
+
+1. **Alur Karyawan, Pelanggan, & Kunjungan Lapangan**:
+   - **Sales Login**: Akun sales login melalui data di `tkaryawan`. Setiap kali masuk, sistem mencatat riwayat login di `log_plantoday`.
+   - **Data Pelanggan**: Sales mendaftarkan calon pembeli baru ke buku kontak pelanggan (`tcustomer`).
+   - **Rencana Kunjungan**: Sales membuat jadwal rencana visit (`tvisit_plan`) yang ditujukan ke pelanggan tertentu di `tcustomer`.
+   - **Laporan Kunjungan Nyata**: Saat sales tiba di lokasi pelanggan, sales melakukan *check-in* (`tvisit`). Sistem menyimpan foto bukti pertemuan, catatan hasil obrolan, dan titik GPS koordinat langsung.
+
+2. **Alur Permintaan Harga ke Surat Penawaran Resmi**:
+   - **Minta Hitung Harga**: Jika pelanggan tertarik memesan produk cetak/custom, sales membuat formulir permintaan harga (`tmintaharga`) lengkap dengan foto contoh produk.
+   - **Penerbitan Surat Penawaran**: Setelah bagian estimasi selesai menghitung harga, diterbitkan Surat Penawaran Resmi:
+     - Bagian kepala/kop surat (nomor surat, nama pelanggan, total biaya, diskon, PPN) tersimpan di `tpenawaran_hdr` menggunakan profil perusahaan dari `tperusahaan`.
+     - Daftar rincian barang per baris (nama barang, jumlah pesanan, harga satuan) tersimpan di `tpenawaran_dtl`.
+
+3. **Alur dari Penawaran Deal ke Produksi Pabrik & Pengiriman (SPK)**:
+   - **Terbit SPK**: Jika pelanggan setuju dengan surat penawaran, penawaran tersebut naik status menjadi Surat Perintah Kerja (`tspk`) untuk dikerjakan pabrik.
+   - **Jadwal Pabrik**: Tim PPIC/Produksi mengatur target kapan pesanan akan selesai dan siap kirim (`tplan_ppic_dtl2` dan `tjadwalkirim`).
+   - **Pengiriman Barang**: Saat barang selesai dicetak dan diantar, diterbitkan Surat Jalan (`tsj_hdr` untuk nomor surat jalan dan `tsj_dtl` untuk rincian jumlah barang yang dibawa).
+   - **Pelacakan Status Pengiriman**: Sistem secara otomatis membandingkan jumlah barang yang dipesan di `tspk` dengan barang yang sudah dikirim di `tsj_dtl`:
+     - *Belum Kirim*: Belum ada surat jalan terbit sama sekali.
+     - *Sebagian*: Barang baru dikirim sebagian (belum lengkap).
+     - *Selesai*: Semua jumlah barang pesanan sudah tuntas dikirim.
+
+4. **Alur Rapor Penjualan & Target Omset (KPI)**:
+   - Manajemen menentukan target penjualan per sales per bulan di `target_omset`.
+   - Hasil transaksi penjualan yang berhasil dicatat di `realisasi_omset`.
+   - Sistem membagi nilai realisasi dengan target untuk menampilkan persentase rapor kinerja (*Achievement %*) dalam bentuk grafik yang mudah dibaca.
+
+5. **Alur Pengiriman Kurir**:
+   - Kurir melihat daftar tugas paket/surat jalan yang harus diantar (`tpengiriman`).
+   - Saat paket diserahkan ke pelanggan, kurir mengambil foto bukti penerimaan (*Proof of Delivery*) dan koordinat lokasi penyerahan.
+
+---
+
+## 🔄 Alur Perjalanan Data (Dari HP Pengguna ke Database)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 👤 Pengguna (Sales / Kurir / Mgr)
+    participant Mobile as 📱 Aplikasi di HP
+    participant API as 🖥️ Server Express
+    participant Storage as 📁 Penyimpanan Foto
+    participant DB as 🗄️ Database MySQL
+
+    Note over User, DB: 1. Masuk Akun (Login)
+    User->>Mobile: Ketik Username & Password
+    Mobile->>API: Kirim data login
+    API->>DB: Cek akun di tabel tkaryawan
+    DB-->>API: Data Akun Cocok
+    API->>DB: Catat aktivitas di log_plantoday
+    API-->>Mobile: Berhasil masuk & simpan sesi login aman (Token JWT)
+
+    Note over User, DB: 2. Laporan Kunjungan Sales
+    User->>Mobile: Isi laporan kunjungan + Jepret Foto + Lokasi GPS
+    Mobile->>API: Kirim data kunjungan & file foto
+    API->>Storage: Kompres & simpan foto ke folder server
+    API->>DB: Simpan catatan & titik GPS ke tabel tvisit
+    DB-->>API: Data tersimpan
+    API-->>Mobile: Laporan kunjungan berhasil dibuat!
+
+    Note over User, DB: 3. Pengajuan Permintaan Harga
+    User->>Mobile: Masukkan spesifikasi pesanan + Foto sampel
+    Mobile->>API: Kirim form permintaan harga
+    API->>Storage: Simpan foto sampel ke folder gambar
+    API->>DB: Simpan data ke tabel tmintaharga
+    DB-->>API: Nomor permohonan terbit
+    API-->>Mobile: Notifikasi pengajuan berhasil terkirim
+
+    Note over User, DB: 4. Pantau Status Pengiriman Pesanan (Tracking SPK)
+    User->>Mobile: Buka menu Tracking SPK
+    Mobile->>API: Minta status pengiriman bulan ini
+    API->>DB: Cek pesanan di tspk dan bandingkan dengan surat jalan tsj_dtl
+    DB-->>API: Hasil perbandingan (Jumlah pesan vs Jumlah kirim)
+    API-->>Mobile: Tampilkan status (Belum Kirim / Sebagian / Selesai)
+```
+
+---
+
+## 📂 Struktur Direktori Proyek
 
 ```
 PlanToday-backend/
-├── config/              # Konfigurasi koneksi pool ke database MySQL (Main, ACH, Penawaran)
-├── controllers/         # Logika utama API & eksekusi query SQL per modul bisnis
-├── middleware/          # Middleware Express (Auth JWT, Logger, Upload File Multer)
-├── routes/              # Definisi endpoint API yang dipetakan ke controller masing-masing
-├── uploads/             # Direktori lokal penampung file upload sementara
-├── utils/               # Fungsi utilitas (pencocokan nama & resolusi identitas sales)
-├── docs/                # Dokumen checklist deployment VPS
-├── .env                 # File konfigurasi variabel lingkungan (diabaikan oleh git)
-├── package.json         # Dependensi proyek & script menjalankan server
-└── server.js            # Entry point utama aplikasi Express
+├── config/              # Konfigurasi koneksi MySQL pool (dbMain, dbAch, dbPenawaran)
+├── controllers/         # Logika bisnis API dan eksekusi query database
+│   ├── achController.js              # Perhitungan omset & KPI
+│   ├── authController.js             # Autentikasi user & JWT
+│   ├── homeController.js             # Customer & Visit management
+│   ├── kurirController.js            # Operasional & bukti kirim kurir
+│   ├── penawaranController.js        # Pembuatan & approval penawaran harga
+│   ├── permintaanHargaController.js  # Permintaan harga & upload sampel
+│   ├── trackingMapController.js      # Tracking posisi memo SPK
+│   ├── trackingPenawaranController.js# Monitoring status penawaran
+│   └── trackingSpkController.js      # Monitoring komitmen & realisasi SPK
+├── middleware/          # Middleware Express (Auth JWT, Logger, Multer Upload)
+├── routes/              # Routing endpoint REST API
+├── uploads/             # Direktori penyimpanan file upload (bukti kunjungan & kurir)
+├── image/               # Direktori penyimpanan gambar permintaan harga
+├── utils/               # Utilitas pembantu (resolusi nama sales, normalisasi tanggal)
+├── docs/                # Dokumentasi tambahan & checklist deployment VPS
+├── .env.example         # Template konfigurasi environment
+├── package.json         # Konfigurasi dependensi Node.js
+└── server.js            # Entry point utama aplikasi
 ```
 
 ---
 
-## ⚙️ Persyaratan Sistem & Instalasi Lokal
+## ⚙️ Panduan Instalasi & Konfigurasi
 
 ### 1. Prasyarat Sistem
-
-- **Node.js**: Versi `>= 20` (disarankan LTS).
-- **MySQL Client**: Server MySQL yang aktif (bisa berupa MySQL lokal untuk development atau koneksi server VPS).
+- **Node.js**: Versi `>= 20.x`
+- **Database**: Server MySQL aktif
 
 ### 2. Instalasi Dependensi
-
-Jalankan perintah berikut di root folder backend:
-
 ```bash
 npm install
-```
-
-_Atau menggunakan perintah npm ci untuk instalasi bersih berbasis package-lock.json:_
-
-```bash
+# atau untuk instalasi berbasis lockfile
 npm ci
 ```
 
----
+### 3. Konfigurasi Environment (`.env`)
+Salin file template `.env.example` menjadi `.env` lalu sesuaikan kredensial database dan port server:
 
-## 🔑 Konfigurasi Variabel Lingkungan (.env)
-
-Buat file bernama `.env` di root folder backend (duplikat dari `.env` yang ada) dan konfigurasikan variabel berikut:
-
-````env
+```env
 # 1. Konfigurasi Database Utama (marketing)
-DB_HOST_MAIN=localhost
-DB_USER_MAIN=your_db_user
-DB_PASSWORD_MAIN='your_db_password'
+DB_HOST_MAIN=127.0.0.1
+DB_USER_MAIN=db_user_placeholder
+DB_PASSWORD_MAIN='db_password_placeholder'
 DB_NAME_MAIN=marketing
 DB_PORT_MAIN=3306
 
-# 2. Konfigurasi Database database_kpi & Achievement
-DB_HOST_ACH=localhost
-DB_USER_ACH=your_db_user
-DB_PASSWORD_ACH='your_db_password'
+# 2. Konfigurasi Database Achievement & KPI (database_kpi)
+DB_HOST_ACH=127.0.0.1
+DB_USER_ACH=db_user_placeholder
+DB_PASSWORD_ACH='db_password_placeholder'
 DB_NAME_ACH=database_kpi
 DB_PORT_ACH=3306
 
-# 3. Konfigurasi Database Penawaran (database_penawaran)
-DB_HOST_PENAWARAN=localhost
-DB_USER_PENAWARAN=your_db_user
-DB_PASSWORD_PENAWARAN='your_db_password'
+# 3. Konfigurasi Database Penawaran & SPK (database_penawaran)
+DB_HOST_PENAWARAN=127.0.0.1
+DB_USER_PENAWARAN=db_user_placeholder
+DB_PASSWORD_PENAWARAN='db_password_placeholder'
 DB_NAME_PENAWARAN=database_penawaran
 DB_PORT_PENAWARAN=3306
 
-# 4. Port Server & Rahasia JWT
+# 4. Port Server & Rahasia JWT Token
 PORT=3001
-JWT_SECRET=your_super_secret_jwt_key
+JWT_SECRET=your_jwt_secret_token_key_here
+```
 
 ---
 
-## 💻 Cara Menjalankan Server di Lokal
+## 💻 Menjalankan Server
 
-Setelah dependensi terpasang dan `.env` sudah dikonfigurasi, jalankan perintah berikut:
-
-### **Mode Development (Auto-Reload)**
-
-Menjalankan server menggunakan `nodemon`. Server akan restart secara otomatis setiap kali ada perubahan file kode.
-
+### Mode Development (Auto-Reload)
 ```bash
 npm run dev
-````
+```
 
-### **Mode Production (Standard)**
-
-Menjalankan server menggunakan runtime Node.js bawaan secara langsung.
-
+### Mode Production
 ```bash
 npm run start
 ```
 
-### **Menjalankan di VPS menggunakan PM2**
-
-Untuk memastikan backend tetap menyala di latar belakang (background process) pada server Linux VPS, gunakan **PM2 Manager**:
-
+### Manajemen Proses VPS dengan PM2
 ```bash
-# Menjalankan aplikasi
+# Menjalankan service API di background
 pm2 start server.js --name plantoday-api
 
-# Melihat log real-time
+# Memantau logs server
 pm2 logs plantoday-api
 
-# Melihat status aplikasi
+# Melihat status service
 pm2 status
 ```
 
 ---
 
-## 🔒 Catatan Arsitektur Keamanan & Autentikasi
+## 🔒 Keamanan & Kebijakan Kredensial
 
-1. **Metode Autentikasi**: Login didasarkan pada pencocokan data username dan password di tabel `tkaryawan` (pada database `marketing`).
-2. **Keamanan Password**: Saat ini, pencocokan password di database dilakukan secara **plain-text** langsung melalui kueri SQL.
-3. **Session Token**: Setelah login sukses, backend akan membuat JWT token yang berisi payload ID Karyawan dengan masa aktif selama **7 hari**. Token ini dikirim kembali ke aplikasi mobile dan harus disertakan pada HTTP Header `Authorization` sebagai `Bearer <token>` untuk mengakses endpoint yang dilindungi.
-4. **Middleware Otorisasi**: File [middleware/auth.js](file:///d:/Coding/PlanToday-backend/middleware/auth.js) bertindak sebagai penjaga gerbang. Middleware ini memverifikasi JWT token, lalu mengidentifikasi pengguna terkait di database utama sebelum melanjutkan request ke API Controller.
-
----
-
-## 📦 Alur Deployment Otomatis (CI/CD)
-
-Backend ini menggunakan alur deployment otomatis (Auto Deploy) via GitHub Actions ke VPS yang terkonfigurasi di berkas `.github/workflows/backend-deploy-vps.yml`.
-
-### Cara Kerja Workflow:
-
-1. **Trigger**: Developer melakukan push commit ke branch `main` pada repositori GitHub.
-2. **Autentikasi SSH**: Runner GitHub Actions terhubung ke VPS melalui SSH menggunakan host, user, dan SSH Key privat yang disimpan di GitHub Secrets.
-3. **Pembaruan Kode**: Runner masuk ke direktori deployment VPS `/var/www/PlanToday_backend` dan mengeksekusi git reset:
-   ```bash
-   git fetch origin
-   git reset --hard origin/main
-   ```
-4. **Penyelarasan Dependensi**: Menjalankan perintah `npm ci` untuk menginstal ulang dependensi secara aman dan cepat.
-5. **Restart Layanan**: Menjalankan perintah `pm2 restart plantoday-api` agar perubahan kode baru langsung dimuat oleh server Express.
+- Seluruh kredensial database dan rahasia enkripsi JWT disimpan secara terisolasi di dalam file `.env` yang diabaikan oleh Git (`.gitignore`).
+- Endpoint yang memerlukan identifikasi data pribadi/perusahaan wajib menyertakan token otorisasi Bearer JWT yang valid.
+- Upload berkas divalidasi berdasarkan tipe MIME dan ukuran maksimum file untuk mencegah eksploitasi server.

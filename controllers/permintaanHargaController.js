@@ -483,6 +483,8 @@ const getPermintaanHargaDetail = async (req, res) => {
                 h.mh_finishing,
                 h.mh_ket,
                 h.mh_status,
+                COALESCE(h.mh_harga_kalkulasi, 0) AS mh_harga_kalkulasi,
+                COALESCE(h.mh_ket_kalkulasi, '') AS mh_ket_kalkulasi,
                 h.user_create,
                 COALESCE(v.divisi,'') AS divisi_nama,
                 COALESCE(s.sal_nama,'') AS sales_nama,
