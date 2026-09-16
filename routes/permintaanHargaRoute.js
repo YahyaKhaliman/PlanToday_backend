@@ -19,6 +19,12 @@ router.post("/permintaan-harga/kalkulasi/spanduk/calculate", auth, controller.ca
 router.post("/permintaan-harga/kalkulasi/mmt/calculate", auth, controller.calculateMmt);
 router.post("/permintaan-harga/kalkulasi/garmen/calculate", auth, controller.calculateGarmen);
 
+// --- RIWAYAT HARGA SO CUSTOMER (PERSIS ENDPOINT MANKSI & ALIAS) ---
+router.get("/penjualan/minta-harga-form/katalog/customer/:cusKode", auth, controller.getCustomerSoHistory);
+router.get("/permintaan-harga/katalog/customer/:cusKode", auth, controller.getCustomerSoHistory);
+router.get("/permintaan-harga/customer-so-history/:cusKode", auth, controller.getCustomerSoHistory);
+router.get("/permintaan-harga/customer-so-history", auth, controller.getCustomerSoHistory);
+
 // --- LOOKUPS GARMEN DARI MANKSI PENAWARAN ---
 router.get("/lookups/jenis-kain-minta-harga", auth, controller.getJenisKainMintaHarga);
 router.get("/lookups/tambahan", auth, controller.getTambahanOptions);

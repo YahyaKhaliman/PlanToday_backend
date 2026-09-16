@@ -352,12 +352,13 @@ const getList = async ({
 
     if (effectiveSalesKode) {
         whereClauses.push(
-            "(p.pot_sal_kode = ? OR s.sal_nama = ? OR s.sal_nama LIKE ?)",
+            "(p.pot_sal_kode = ? OR s.sal_nama = ? OR s.sal_nama LIKE ? OR m.mspk_sal_kode = ?)",
         );
         params.push(
             effectiveSalesKode,
             effectiveSalesKode,
             `%${effectiveSalesKode}%`,
+            effectiveSalesKode,
         );
     }
 
@@ -367,13 +368,15 @@ const getList = async ({
             (
                 p.pot_nomor LIKE ?
                 OR p.pot_nama_item LIKE ?
+                OR COALESCE(m.mspk_nama, '') LIKE ?
+                OR COALESCE(d.pend_nama_barang, '') LIKE ?
                 OR COALESCE(p.pot_pen_nomor, '') LIKE ?
-                OR COALESCE(p.pot_mspk_nomor, '') LIKE ?
+                OR COALESCE(p.pot_mspk_nomor, m.mspk_nomor, '') LIKE ?
                 OR COALESCE(c.cus_nama, '') LIKE ?
                 OR COALESCE(s.sal_nama, '') LIKE ?
             )
         `);
-        params.push(like, like, like, like, like, like);
+        params.push(like, like, like, like, like, like, like, like);
     }
 
     const normalizedStatus = String(statusFilter || "ALL")
@@ -389,27 +392,46 @@ const getList = async ({
 
     const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
 
-    // Query Detail List
+    // Query Detail List Dinamis dengan LEFT JOIN ke MAP & Penawaran
     const [listRows] = await db.query(
         `
         SELECT 
             p.pot_nomor,
             p.pot_sal_kode,
-            p.pot_sal_kode AS sales_kode,
-            COALESCE(s.sal_nama, '') AS sal_nama,
-            COALESCE(s.sal_nama, '') AS sales_nama,
+            COALESCE(MAX(s.sal_kode), p.pot_sal_kode) AS sales_kode,
+            COALESCE(MAX(s.sal_nama), '') AS sal_nama,
+            COALESCE(MAX(s.sal_nama), '') AS sales_nama,
             p.pot_cus_kode,
-            p.pot_cus_kode AS customer_kode,
-            COALESCE(c.cus_nama, '') AS cus_nama,
-            COALESCE(c.cus_nama, '') AS customer_nama,
+            COALESCE(MAX(c.cus_kode), p.pot_cus_kode) AS customer_kode,
+            COALESCE(MAX(c.cus_nama), '') AS cus_nama,
+            COALESCE(MAX(c.cus_nama), '') AS customer_nama,
             p.pot_pen_nomor,
             p.pot_pen_nomor AS pen_nomor,
-            p.pot_mspk_nomor,
-            p.pot_mspk_nomor AS mspk_nomor,
-            p.pot_nama_item,
-            p.pot_nama_item AS nama_item,
-            COALESCE(p.pot_harga, 0) AS pot_harga,
-            COALESCE(p.pot_harga, 0) AS harga,
+            COALESCE(p.pot_mspk_nomor, MAX(m.mspk_nomor), '') AS mspk_nomor,
+            COALESCE(p.pot_mspk_nomor, MAX(m.mspk_nomor), '') AS pot_mspk_nomor,
+            COALESCE(
+                NULLIF(MAX(m.mspk_nama), ''),
+                NULLIF(MAX(d.pend_nama_barang), ''),
+                p.pot_nama_item
+            ) AS pot_nama_item,
+            COALESCE(
+                NULLIF(MAX(m.mspk_nama), ''),
+                NULLIF(MAX(d.pend_nama_barang), ''),
+                p.pot_nama_item
+            ) AS nama_item,
+            p.pot_harga AS pot_harga_awal,
+            COALESCE(
+                NULLIF(MAX(COALESCE(m.Mspk_harga, 0) * COALESCE(m.Mspk_jumlah, 1)), 0),
+                NULLIF(MAX(COALESCE(d.pend_harga, 0) * COALESCE(d.pend_qty, 1)), 0),
+                p.pot_harga,
+                0
+            ) AS pot_harga,
+            COALESCE(
+                NULLIF(MAX(COALESCE(m.Mspk_harga, 0) * COALESCE(m.Mspk_jumlah, 1)), 0),
+                NULLIF(MAX(COALESCE(d.pend_harga, 0) * COALESCE(d.pend_qty, 1)), 0),
+                p.pot_harga,
+                0
+            ) AS harga,
             COALESCE(p.pot_status, 'POTENSI') AS pot_status,
             COALESCE(p.pot_status, 'POTENSI') AS status,
             COALESCE(p.pot_alasan_batal, '') AS pot_alasan_batal,
@@ -418,9 +440,38 @@ const getList = async ({
             DATE_FORMAT(p.date_create, '%Y-%m-%d %H:%i:%s') AS date_create,
             COALESCE(p.user_create, '') AS user_create
         FROM tpotensi p
-        LEFT JOIN tcustomer c ON c.cus_kode = p.pot_cus_kode
-        LEFT JOIN tsales s ON s.sal_kode = p.pot_sal_kode
+        LEFT JOIN tmemospk m 
+            ON (
+                (p.pot_mspk_nomor IS NOT NULL AND m.mspk_nomor = p.pot_mspk_nomor)
+                OR (
+                    p.pot_pen_nomor IS NOT NULL 
+                    AND m.mspk_pen_nomor = p.pot_pen_nomor 
+                    AND (m.mspk_nama = p.pot_nama_item OR m.mspk_nama LIKE CONCAT('%', p.pot_nama_item, '%'))
+                )
+            )
+            AND COALESCE(m.mspk_close, '') <> 'Y'
+        LEFT JOIN tpenawaran_hdr h 
+            ON h.pen_nomor = COALESCE(p.pot_pen_nomor, m.mspk_pen_nomor)
+        LEFT JOIN tpenawaran_dtl d 
+            ON d.pend_pen_nomor = h.pen_nomor 
+           AND (d.pend_id = m.mspk_pen_id OR d.pend_nama_barang = p.pot_nama_item)
+        LEFT JOIN tcustomer c 
+            ON c.cus_kode = COALESCE(p.pot_cus_kode, m.mspk_cus_kode, h.pen_cus_kode)
+        LEFT JOIN tsales s 
+            ON s.sal_kode = COALESCE(p.pot_sal_kode, m.mspk_sal_kode, h.pen_sal_kode)
         ${whereSql}
+        GROUP BY 
+            p.pot_nomor,
+            p.pot_sal_kode,
+            p.pot_cus_kode,
+            p.pot_pen_nomor,
+            p.pot_mspk_nomor,
+            p.pot_nama_item,
+            p.pot_harga,
+            p.pot_status,
+            p.pot_alasan_batal,
+            p.date_create,
+            p.user_create
         ORDER BY p.date_create DESC, p.pot_nomor DESC
         LIMIT 300
         `,

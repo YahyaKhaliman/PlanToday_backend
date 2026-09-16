@@ -202,18 +202,18 @@ const generateKalkulasiNomor = async (conn, tanggal) => {
     const d = tanggal ? new Date(tanggal) : new Date();
     const tahunStr = String(d.getFullYear()).slice(-2);
     const bulanStr = String(d.getMonth() + 1).padStart(2, "0");
-    const prefix = `KAL-${tahunStr}${bulanStr}`;
+    const prefix = `KALS-${tahunStr}${bulanStr}`;
 
     const [kalRows] = await conn.query(
         `SELECT IFNULL(MAX(CAST(RIGHT(kal_nomor, 4) AS UNSIGNED)), 0) AS max_val 
-         FROM kalkulasi.tkalkulasi2_hdr 
-         WHERE kal_nomor LIKE ? AND LEFT(kal_nomor, 3) = 'KAL'`,
+         FROM kalkulasi.tkalkulasi_hdr 
+         WHERE kal_nomor LIKE ? AND LEFT(kal_nomor, 4) = 'KALS'`,
         [`%${tahunStr}${bulanStr}%`],
     );
     const [mhRows] = await conn.query(
         `SELECT IFNULL(MAX(CAST(RIGHT(mh_nomor_kalkulasi, 4) AS UNSIGNED)), 0) AS max_val 
          FROM tmintaharga 
-         WHERE mh_nomor_kalkulasi LIKE ? AND LEFT(mh_nomor_kalkulasi, 3) = 'KAL'`,
+         WHERE mh_nomor_kalkulasi LIKE ? AND LEFT(mh_nomor_kalkulasi, 4) = 'KALS'`,
         [`%${tahunStr}${bulanStr}%`],
     );
 
@@ -231,11 +231,16 @@ const createPermintaanHargaInTransaction = async ({
 }) => {
     const divisiNum = toNumber(payload.mh_divisi, 0);
     const hargaKalkulasi = toNumber(payload.mh_harga_kalkulasi, 0);
+    const hargaPengajuan = toNumber(payload.mh_harga, 0);
     let initialStatus = "MINTA";
     if (payload.mh_status) {
         initialStatus = String(payload.mh_status).trim().toUpperCase();
     } else if (hargaKalkulasi > 0) {
-        initialStatus = "WAIT";
+        if (hargaPengajuan > 0 && hargaPengajuan >= hargaKalkulasi) {
+            initialStatus = "DONE";
+        } else {
+            initialStatus = "NEGO";
+        }
     } else {
         initialStatus = "MINTA";
     }
@@ -375,7 +380,9 @@ const createPermintaanHargaInTransaction = async ({
 
                     // Cocokkan baris warna terpilih
                     const matchedWarna = kRows.find(
-                        (r) => (r.mhk_warna || "").toUpperCase().trim() === normWarna,
+                        (r) =>
+                            (r.mhk_warna || "").toUpperCase().trim() ===
+                            normWarna,
                     );
                     if (matchedWarna) {
                         hargaBahanGarmen = toNumber(matchedWarna.mhk_harga, 0);
@@ -399,50 +406,85 @@ const createPermintaanHargaInTransaction = async ({
                                 (r.mhk_warna || "").toUpperCase().trim() ===
                                     "TUA" && Number(r.mhk_harga) > 0,
                         );
-                        hargaBahanLenganGarmen = rowTua
-                            ? Number(rowTua.mhk_harga)
-                            : hargaBahanGarmen;
+                        if (rowTua) {
+                            hargaBahanLenganGarmen = toNumber(
+                                rowTua.mhk_harga,
+                                0,
+                            );
+                        }
                     }
 
-                    kRows.forEach((r) => {
-                        const komp = (r.mhk_komponen || "")
-                            .toUpperCase()
-                            .trim();
-                        const val = Number(r.mhk_babaran) || 0;
-                        if (komp === "BODY" && val > 0) bBodyGarmen = val;
-                        else if (komp === "LENGAN" && val > 0)
-                            bLenganGarmen = val;
-                        else if (komp === "RIB" && val >= 10) bRibGarmen = val;
-                        else if (val > 0 && bBodyGarmen === 0)
-                            bBodyGarmen = val;
-                    });
+                    const bodyRow = kRows.find(
+                        (r) =>
+                            (r.mhk_komponen || "").toUpperCase().trim() ===
+                            "BODY",
+                    );
+                    if (bodyRow) bBodyGarmen = toNumber(bodyRow.mhk_babaran, 0);
+
+                    const lenganRow = kRows.find(
+                        (r) =>
+                            (r.mhk_komponen || "").toUpperCase().trim() ===
+                            "LENGAN",
+                    );
+                    if (lenganRow)
+                        bLenganGarmen = toNumber(lenganRow.mhk_babaran, 0);
+
+                    const ribRow = kRows.find(
+                        (r) =>
+                            (r.mhk_komponen || "").toUpperCase().trim() ===
+                            "RIB",
+                    );
+                    if (ribRow) bRibGarmen = toNumber(ribRow.mhk_babaran, 70);
                 }
 
-                if (kalRpAllowance === 0 && kalRpLaba === 0 && normJenisKain) {
+                if (bBodyGarmen === 0) {
+                    if (
+                        ktgGarmen.includes("LACOST") ||
+                        ktgGarmen.includes("PIQUE")
+                    ) {
+                        bBodyGarmen = 2.4;
+                    } else if (
+                        ktgGarmen === "PE" ||
+                        ktgGarmen === "HYGIT" ||
+                        ktgGarmen === "DRYFIT"
+                    ) {
+                        bBodyGarmen = 3.5;
+                    } else {
+                        bBodyGarmen = 2.8;
+                    }
+                }
+
+                if (bBodyGarmen > 0 && hargaBahanGarmen > 0) {
                     const isSport =
                         ktgGarmen === "PE" ||
                         ktgGarmen === "HYGIT" ||
                         ktgGarmen === "DRYFIT";
 
-                    // Ambil master biaya jahit konveksi dari DB tmintaharga_biaya
-                    let dbBiayaJahit = null;
+                    let dbBiayaJahit = undefined;
                     try {
                         const [jRows] = await conn.query(
                             "SELECT mhb_ket, mhb_biaya FROM tmintaharga_biaya WHERE mhb_jenis = 'JAHIT'",
                         );
                         if (jRows && jRows.length > 0) {
-                            const rowJ = jRows.find((j) => {
-                                const ket = (j.mhb_ket || "")
-                                    .trim()
-                                    .toUpperCase();
-                                return isSport
-                                    ? ket === "PE" ||
-                                          ket === "HYGIT" ||
-                                          ket === "DRYFIT" ||
-                                          ket === "SPORT"
-                                    : ket === "-" || ket === "";
-                            });
-                            if (rowJ) dbBiayaJahit = Number(rowJ.mhb_biaya) || 0;
+                            let pattern = /oblong/i;
+                            if (normKodeModel === "KH-0002")
+                                pattern = /raglan/i;
+                            else if (normKodeModel === "KH-0003")
+                                pattern = /polo/i;
+                            else if (normKodeModel === "KH-0004")
+                                pattern = /kemeja/i;
+                            else if (normKodeModel === "KH-0005")
+                                pattern = /jaket/i;
+
+                            const matchedJahit = jRows.find((r) =>
+                                pattern.test(r.mhb_ket || ""),
+                            );
+                            if (
+                                matchedJahit &&
+                                Number(matchedJahit.mhb_biaya) > 0
+                            ) {
+                                dbBiayaJahit = Number(matchedJahit.mhb_biaya);
+                            }
                         }
                     } catch (jErr) {
                         console.warn(
@@ -451,30 +493,22 @@ const createPermintaanHargaInTransaction = async ({
                         );
                     }
 
-                    // Ambil tier margin DB tmintaharga_margin
-                    let autoCustomTiers = null;
+                    let autoCustomTiers = undefined;
                     try {
                         const [mRows] = await conn.query(
                             "SELECT qmin, qmax, margin, model FROM tmintaharga_margin WHERE model = ? ORDER BY qmin",
                             [normKodeModel],
                         );
                         if (mRows && mRows.length > 0) {
-                            autoCustomTiers = mRows.map((r, idx) => {
-                                const qmin = Number(r.qmin) || 0;
-                                const qmax = Number(r.qmax) || 999999;
-                                const persen = Number(r.margin) || 0;
-                                const label =
-                                    qmax >= 999999
-                                        ? `≥ ${qmin} PCS`
-                                        : `${qmin} - ${qmax} PCS`;
-                                return {
-                                    tier: idx + 1,
-                                    label,
-                                    qmin,
-                                    qmax,
-                                    persen,
-                                };
-                            });
+                            autoCustomTiers = mRows.map((r) => ({
+                                min: Number(r.qmin) || 0,
+                                max:
+                                    Number(r.qmax) >= 999999
+                                        ? Infinity
+                                        : Number(r.qmax),
+                                persen: Number(r.margin) || 0,
+                                label: `${r.qmin} - ${r.qmax}`,
+                            }));
                         }
                     } catch (mErr) {
                         console.warn(
@@ -526,14 +560,15 @@ const createPermintaanHargaInTransaction = async ({
         try {
             await conn.query(
                 `
-                INSERT INTO kalkulasi.tkalkulasi2_hdr (
-                    kal_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
+                INSERT INTO kalkulasi.tkalkulasi_hdr (
+                    kal_nomor, kal_mh_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
                     kal_order, kal_rencanaorder, kal_rpallowance, kal_allowance,
                     kal_rplaba, kal_laba, kal_persen, kal_pakaiobat, kal_ppn,
                     kal_rpsesuai, kal_rpsesuaippn, kal_ket, kal_ketbeli,
                     user_create, date_create
-                ) VALUES (?, ?, NOW(), ?, ?, 0, ?, ?, ?, ?, ?, 'Y', 'N', ?, ?, ?, ?, ?, ?, NOW())
+                ) VALUES (?, ?, ?, NOW(), ?, ?, 0, ?, ?, ?, ?, ?, 'Y', 'N', ?, ?, ?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE
+                    kal_mh_nomor = VALUES(kal_mh_nomor),
                     kal_project = VALUES(kal_project),
                     kal_cus = VALUES(kal_cus),
                     kal_kh_kode = VALUES(kal_kh_kode),
@@ -552,6 +587,7 @@ const createPermintaanHargaInTransaction = async ({
                 `,
                 [
                     nomorKalkulasi,
+                    nomor,
                     String(payload.mh_nama || "").trim(),
                     String(payload.mh_cus_nama || "").trim(),
                     modelKhKode,
@@ -573,19 +609,19 @@ const createPermintaanHargaInTransaction = async ({
             if (divisiNum === 4) {
                 try {
                     await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_komponen WHERE kk_nomor = ?",
+                        "DELETE FROM kalkulasi.tkalkulasi_komponen WHERE kk_nomor = ?",
                         [nomorKalkulasi],
                     );
                     await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_dtl WHERE kald_nomor = ?",
+                        "DELETE FROM kalkulasi.tkalkulasi_dtl WHERE kald_nomor = ?",
                         [nomorKalkulasi],
                     );
                     await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_aksesories WHERE ka_nomor = ?",
+                        "DELETE FROM kalkulasi.tkalkulasi_aksesories WHERE ka_nomor = ?",
                         [nomorKalkulasi],
                     );
                     await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_ctk WHERE kc_nomor = ?",
+                        "DELETE FROM kalkulasi.tkalkulasi_ctk WHERE kc_nomor = ?",
                         [nomorKalkulasi],
                     );
 
@@ -595,10 +631,11 @@ const createPermintaanHargaInTransaction = async ({
                         ktgGarmen === "DRYFIT"
                             ? 2800
                             : 5610;
+                    const ongkirVal = toNumber(payload.mh_ongkir, 0);
                     await conn.query(
-                        `INSERT INTO kalkulasi.tkalkulasi2_dtl (kald_nomor, kald_rppotong, kald_rpjahit, kald_rpfinishing, kald_rpkirim, kald_rpbiayaobat) 
-                         VALUES (?, 0, ?, 0, 0, 0)`,
-                        [nomorKalkulasi, biayaKonveksi],
+                        `INSERT INTO kalkulasi.tkalkulasi_dtl (kald_nomor, kald_rppotong, kald_rpjahit, kald_rpfinishing, kald_rpkirim, kald_rpbiayaobat) 
+                         VALUES (?, 0, ?, 0, ?, 0)`,
+                        [nomorKalkulasi, biayaKonveksi, ongkirVal],
                     );
 
                     const normJenisKain = String(
@@ -676,7 +713,7 @@ const createPermintaanHargaInTransaction = async ({
                     }
                     if (kompValues.length > 0) {
                         await conn.query(
-                            `INSERT INTO kalkulasi.tkalkulasi2_komponen (kk_nomor, kk_komponen, kk_kg, kk_pabrik, kk_jeniskain, kk_lengan, kk_warna, kk_harga, kk_babaran, kk_pcs, kald_logbody, kald_loglengan, kk_nourut) VALUES ?`,
+                            `INSERT INTO kalkulasi.tkalkulasi_komponen (kk_nomor, kk_komponen, kk_kg, kk_pabrik, kk_jeniskain, kk_lengan, kk_warna, kk_harga, kk_babaran, kk_pcs, kald_logbody, kald_loglengan, kk_nourut) VALUES ?`,
                             [kompValues],
                         );
                     }
@@ -692,7 +729,7 @@ const createPermintaanHargaInTransaction = async ({
                             idx + 1,
                         ]);
                         await conn.query(
-                            `INSERT INTO kalkulasi.tkalkulasi2_aksesories (ka_nomor, ka_aksesories, ka_biaya, ka_nourut) VALUES ?`,
+                            `INSERT INTO kalkulasi.tkalkulasi_aksesories (ka_nomor, ka_aksesories, ka_biaya, ka_nourut) VALUES ?`,
                             [aksValues],
                         );
                     }
@@ -708,7 +745,7 @@ const createPermintaanHargaInTransaction = async ({
                             idx + 1,
                         ]);
                         await conn.query(
-                            `INSERT INTO kalkulasi.tkalkulasi2_ctk (kc_nomor, kc_ket, kc_biaya, kc_nourut) VALUES ?`,
+                            `INSERT INTO kalkulasi.tkalkulasi_ctk (kc_nomor, kc_ket, kc_biaya, kc_nourut) VALUES ?`,
                             [ctkValues],
                         );
                     }
@@ -804,11 +841,11 @@ const createPermintaanHargaInTransaction = async ({
         `
         INSERT INTO tmintaharga (
             mh_divisi, mh_nomor, mh_tanggal, mh_cus_kode, mh_cus_nama, mh_sal_kode,
-            mh_nama, mh_jmlorder, mh_harga, mh_budget, mh_dateorder, mh_kain,
+            mh_nama, mh_jmlorder, mh_harga, mh_ongkir, mh_budget, mh_dateorder, mh_kain,
             mh_panjang, mh_lebar, mh_ukuran, mh_gramasi, mh_finishing, mh_sublim,
             mh_ket, mh_warna, mh_status, date_create, user_create,
             mh_harga_kalkulasi, mh_ket_kalkulasi, mh_nomor_kalkulasi, mh_date_kalkulasi
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
         `,
         [
             divisiNum,
@@ -820,6 +857,7 @@ const createPermintaanHargaInTransaction = async ({
             String(payload.mh_nama || "").trim(),
             toNumber(payload.mh_jmlorder, 0),
             toNumber(payload.mh_harga, 0),
+            toNumber(payload.mh_ongkir, 0),
             toNumber(payload.mh_budget, 0),
             payload.mh_dateorder ? normalizeDate(payload.mh_dateorder) : null,
             finalKain,
@@ -904,6 +942,8 @@ const getPermintaanHargaList = async ({
             COALESCE(m.mh_cus_nama,'') AS customer,
             COALESCE(v.divisi,'') AS divisi,
             COALESCE(m.mh_jmlorder,0) AS jml_order,
+            COALESCE(m.mh_harga, 0) AS mh_harga,
+            COALESCE(m.mh_harga, 0) AS harga,
             COALESCE(m.mh_harga_kalkulasi,0) AS harga_kalkulasi,
             COALESCE(m.mh_status,'') AS status,
             COALESCE(m.mh_ket_kalkulasi,'') AS ket_kalkulasi,
@@ -940,6 +980,7 @@ const getPermintaanHargaDetail = async ({
             h.mh_nama,
             h.mh_jmlorder,
             h.mh_harga,
+            COALESCE(h.mh_ongkir, 0) AS mh_ongkir,
             h.mh_budget,
             DATE_FORMAT(h.mh_dateorder, '%Y-%m-%d') AS mh_dateorder,
             h.mh_kain,
@@ -956,6 +997,8 @@ const getPermintaanHargaDetail = async ({
             COALESCE(h.mh_ket_kalkulasi, '') AS mh_ket_kalkulasi,
             COALESCE(h.mh_nomor_kalkulasi, '') AS mh_nomor_kalkulasi,
             DATE_FORMAT(h.mh_date_kalkulasi, '%Y-%m-%d %H:%i:%s') AS mh_date_kalkulasi,
+            COALESCE(h.mh_apv_usr, '') AS mh_apv_usr,
+            COALESCE(NULLIF(h.mh_apv_usr, ''), NULLIF(h.user_modified, ''), h.user_create, '') AS user_kalkulasi,
             h.user_create,
             COALESCE(v.divisi,'') AS divisi_nama,
             COALESCE(s.sal_nama,'') AS sales_nama,
@@ -1022,7 +1065,7 @@ const createPermintaanHarga = async ({ body, user }) => {
                 }
 
                 let resolvedSalesKode = String(
-                    user?.sales_kode || body.mh_sal_kode || "",
+                    body.mh_sal_kode || user?.sales_kode || "",
                 ).trim();
 
                 if (!resolvedSalesKode) {
@@ -1164,6 +1207,9 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             if (byName?.sales_kode) updateSalesKode = byName.sales_kode;
         } catch (e) {}
     }
+    if (!updateSalesKode) {
+        updateSalesKode = String(rows[0].mh_sal_kode || "").trim();
+    }
 
     await db.query(
         `
@@ -1177,6 +1223,7 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             mh_nama = ?,
             mh_jmlorder = ?,
             mh_harga = ?,
+            mh_ongkir = ?,
             mh_budget = ?,
             mh_dateorder = ?,
             mh_kain = ?,
@@ -1203,6 +1250,7 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             String(body.mh_nama || "").trim(),
             toNumber(body.mh_jmlorder, 0),
             toNumber(body.mh_harga, 0),
+            toNumber(body.mh_ongkir, 0),
             toNumber(body.mh_budget, 0),
             normalizeDate(body.mh_dateorder),
             updateKain,
@@ -1957,6 +2005,7 @@ const getPermintaanHargaStatusCounts = async ({
         BELUM: 0,
         MINTA: 0,
         WAIT: 0,
+        NEGO: 0,
         DONE: 0,
         CANCEL: 0,
     };
@@ -2050,6 +2099,14 @@ const calculateSpanduk = async ({
 }) => {
     const numPanjang = toNumber(panjang, 0);
     const numQty = toNumber(qty, 0);
+    const normMetode = (metode || "MANUAL").toUpperCase().trim();
+
+    if (normMetode === "MANUAL" && numQty < 100) {
+        throw new Error(
+            "Cetak Spanduk Manual minimal pemesanan 100 pcs. Silakan gunakan metode Cetak Machine untuk pesanan di bawah 100 pcs.",
+        );
+    }
+
     const totalMeter = Math.round(numPanjang * numQty * 100) / 100;
 
     const [allStrata] = await db.query(
@@ -2061,7 +2118,7 @@ const calculateSpanduk = async ({
          FROM tmintaharga_spanduk 
          WHERE mhsp_metode = ? AND mhsp_lebar = ? AND mhsp_jenis_kain = ? 
          ORDER BY mhsp_qmin`,
-        [metode, toNumber(lebar, 90), jenisKain],
+        [normMetode, toNumber(lebar, 90), jenisKain],
     );
 
     let matched = allStrata.find(
@@ -2435,7 +2492,8 @@ const calculateGarmen = async ({
         customTiers,
         kodeModel: normKodeModel,
         hargaBahan,
-        hargaBahanLengan: typeof hargaBahanLengan !== "undefined" ? hargaBahanLengan : 0,
+        hargaBahanLengan:
+            typeof hargaBahanLengan !== "undefined" ? hargaBahanLengan : 0,
         bBody,
         bLengan,
         bRib,
@@ -2582,11 +2640,117 @@ const getCetakOptions = async () => {
             mhb_ket AS keterangan,
             mhb_biaya,
             mhb_biaya AS biaya 
-         FROM tmintaharga_biaya 
-         WHERE mhb_biaya <> 0 AND mhb_jenis IN ('SABLON', 'SUBLIM') 
-         ORDER BY mhb_jenis, mhb_ket`,
+        FROM tmintaharga_biaya 
+        WHERE mhb_biaya <> 0 AND mhb_jenis IN ('SABLON', 'SUBLIM') 
+        ORDER BY mhb_jenis, mhb_ket`,
     );
     return rows;
+};
+
+const getCustomerSoHistory = async (options = {}) => {
+    const cusKode = typeof options === "string" ? options : options.cusKode;
+    const {
+        divisi = "SEMUA",
+        q = "",
+        page = 1,
+        limit = 20,
+    } = typeof options === "object" ? options : {};
+
+    const normCusKode = String(cusKode || "").trim();
+    if (!normCusKode) {
+        return {
+            data: [],
+            pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+        };
+    }
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const offset = (pageNum - 1) * limitNum;
+
+    const where = ["so.so_cus_kode = ?", "COALESCE(so.so_aktif, 'Y') = 'Y'"];
+    const params = [normCusKode];
+
+    const normDivisi = String(divisi || "SEMUA")
+        .trim()
+        .toUpperCase();
+    if (normDivisi && normDivisi !== "SEMUA" && normDivisi !== "ALL") {
+        if (/^\d+$/.test(normDivisi)) {
+            where.push("so.so_divisi = ?");
+            params.push(parseInt(normDivisi, 10));
+        } else if (normDivisi === "SPANDUK") {
+            where.push("so.so_divisi = 1");
+        } else if (normDivisi === "GARMEN") {
+            where.push("so.so_divisi = 4");
+        } else if (normDivisi === "MMT") {
+            where.push("so.so_divisi = 5");
+        } else {
+            where.push("v.divisi LIKE ?");
+            params.push(`%${normDivisi}%`);
+        }
+    }
+
+    const normQ = String(q || "").trim();
+    if (normQ) {
+        where.push(
+            "(so.so_nama LIKE ? OR so.so_nama2 LIKE ? OR so.so_nomor LIKE ? OR so.so_kain LIKE ? OR so.so_finishing LIKE ? OR so.so_ukuran LIKE ?)",
+        );
+        params.push(
+            `%${normQ}%`,
+            `%${normQ}%`,
+            `%${normQ}%`,
+            `%${normQ}%`,
+            `%${normQ}%`,
+            `%${normQ}%`,
+        );
+    }
+
+    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+    const [cntRows] = await db.query(
+        `SELECT COUNT(*) AS total
+         FROM tsalesorder so
+         LEFT JOIN tdivisi v ON v.kode = so.so_divisi
+         ${whereSql}`,
+        params,
+    );
+    const total = parseInt(cntRows?.[0]?.total || 0, 10);
+
+    const [rows] = await db.query(
+        `SELECT 
+            so.so_nomor,
+            DATE_FORMAT(so.so_tanggal, '%Y-%m-%d') AS so_tanggal,
+            DATE_FORMAT(so.so_tanggal, '%d/%m/%Y') AS so_tanggal_fmt,
+            COALESCE(so.so_nama, '') AS so_nama,
+            COALESCE(so.so_nama2, '') AS so_nama2,
+            COALESCE(so.so_jumlah, 0) AS so_jumlah,
+            COALESCE(so.so_harga, 0) AS so_harga,
+            COALESCE(so.so_ukuran, '') AS so_ukuran,
+            COALESCE(so.so_kain, '') AS so_kain,
+            COALESCE(so.so_finishing, '') AS so_finishing,
+            COALESCE(so.so_panjang, 0) AS so_panjang,
+            COALESCE(so.so_lebar, 0) AS so_lebar,
+            COALESCE(so.so_gramasi, '') AS so_gramasi,
+            COALESCE(so.so_keterangan, '') AS so_keterangan,
+            COALESCE(so.so_divisi, 0) AS so_divisi,
+            COALESCE(v.divisi, '') AS divisi_nama
+        FROM tsalesorder so
+        LEFT JOIN tdivisi v ON v.kode = so.so_divisi
+        ${whereSql}
+        ORDER BY so.so_tanggal DESC, so.so_nomor DESC
+        LIMIT ? OFFSET ?`,
+        [...params, limitNum, offset],
+    );
+
+    return {
+        data: rows || [],
+        pagination: {
+            page: pageNum,
+            limit: limitNum,
+            total,
+            totalPages: Math.ceil(total / limitNum),
+        },
+    };
 };
 
 module.exports = {
@@ -2615,4 +2779,5 @@ module.exports = {
     getJenisKainMintaHarga,
     getTambahanOptions,
     getCetakOptions,
+    getCustomerSoHistory,
 };

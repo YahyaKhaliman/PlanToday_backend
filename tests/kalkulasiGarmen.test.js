@@ -135,10 +135,11 @@ describe("Unit Test: Logika Kalkulasi Garmen PlanToday (Murni / Tanpa DB)", () =
             expect(res.strataAktif.tier).toBe(1);
             expect(res.strataAktif.persen).toBe(20);
             expect(res.strataAktif.marginRp).toBe(7922);
-            expect(res.hargaJualPerPcs).toBe(39609 + 7922 + 12000);
-            expect(res.hargaUpPerPcs).toBe(bulatkanHargaUp(res.hargaJualPerPcs));
-            expect(res.totalHargaOrder).toBe(res.hargaUpPerPcs * 150);
+            expect(res.hargaJualPerPcs).toBe(48000 + 12000);
+            expect(res.hargaUpPerPcs).toBe(res.hargaJualPerPcs);
+            expect(res.totalHargaOrder).toBe(res.hargaJualPerPcs * 150);
             expect(res.tabelReferensi).toHaveLength(5);
+            expect(res.tabelReferensi[0].up).toBe(48000);
         });
 
         it("harus menghitung biaya tambahan dan cetak secara akurat", () => {
@@ -163,8 +164,11 @@ describe("Unit Test: Logika Kalkulasi Garmen PlanToday (Murni / Tanpa DB)", () =
             expect(res.tambahan.totalPerPcs).toBe(5000);
             expect(res.cetak.totalOrder).toBe(1000000);
             expect(res.cetak.totalPerPcs).toBe(10000);
-            // Total tambahan + cetak per pcs = 15.000
-            expect(res.hargaJualPerPcs).toBe(res.hpp + res.strataAktif.marginRp + 15000);
+            // Total = Harga Bahan UP (48.000) + tambahan (5.000) + cetak (10.000) = 63.000
+            expect(res.hargaJualPerPcs).toBe(
+                res.strataAktif.hargaBahanUp + 15000,
+            );
+            expect(res.hargaJualPerPcs).toBe(63000);
         });
     });
 });

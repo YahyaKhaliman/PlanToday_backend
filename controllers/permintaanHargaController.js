@@ -404,6 +404,28 @@ const getCetakOptions = async (req, res) => {
     }
 };
 
+const getCustomerSoHistory = async (req, res) => {
+    try {
+        const cusKode = req.params.cusKode || req.query.cus_kode;
+        const { divisi = "SEMUA", q = "", page = 1, limit = 20 } = req.query;
+        const result = await permintaanHargaService.getCustomerSoHistory({
+            cusKode,
+            divisi,
+            q,
+            page,
+            limit,
+        });
+        return res.json({
+            success: true,
+            data: result.data,
+            pagination: result.pagination,
+        });
+    } catch (err) {
+        console.error("[PermintaanHarga][CustomerSoHistory][Error]", err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
 module.exports = {
     getKalkulasiOptions,
     calculateSpanduk,
@@ -412,6 +434,7 @@ module.exports = {
     getJenisKainMintaHarga,
     getTambahanOptions,
     getCetakOptions,
+    getCustomerSoHistory,
     getPermintaanHargaList,
     getPermintaanHargaDetail,
     createPermintaanHarga,

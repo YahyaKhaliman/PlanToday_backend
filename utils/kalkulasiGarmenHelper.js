@@ -206,16 +206,18 @@ function kalkulasiGarmenEngine({
 
     const matchedTier = tentukanTierMargin(numQty, tiersList);
     const marginRp = Math.round(hpp * (matchedTier.persen / 100));
+    const hargaBahanDasar = hpp + marginRp;
+    const hargaBahanUp = bulatkanHargaUp(hargaBahanDasar);
 
-    // Harga Jual per pcs = HPP + Margin + Tambahan/pcs + Cetak/pcs
+    // Total Kalkulasi = Harga Bahan (UP dari master bahan) + Tambahan/pcs + Cetak/pcs
     const totalTambahanDanCetakPerPcs = tambahanPerPcs + cetakPerPcs;
-    const hargaJualPerPcs = hpp + marginRp + totalTambahanDanCetakPerPcs;
-    const hargaUpPerPcs = bulatkanHargaUp(hargaJualPerPcs);
-    const totalHargaOrder = Math.round(hargaUpPerPcs * numQty);
+    const hargaJualPerPcs = hargaBahanUp + totalTambahanDanCetakPerPcs;
+    const hargaUpPerPcs = hargaJualPerPcs;
+    const totalHargaOrder = Math.round(hargaJualPerPcs * numQty);
 
     const tabelReferensi = tiersList.map((t) => {
         const m = Math.round(hpp * (t.persen / 100));
-        const j = hpp + m + totalTambahanDanCetakPerPcs;
+        const j = Math.round(hpp + m);
         const u = bulatkanHargaUp(j);
         return {
             tier: t.tier,
@@ -250,6 +252,7 @@ function kalkulasiGarmenEngine({
             label: matchedTier.label,
             persen: matchedTier.persen,
             marginRp,
+            hargaBahanUp,
         },
         hargaJualPerPcs,
         hargaUpPerPcs,
