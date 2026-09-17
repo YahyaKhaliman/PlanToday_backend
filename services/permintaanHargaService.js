@@ -2406,7 +2406,14 @@ const calculateGarmen = async ({
     let resolvedCetak = [];
     if (Array.isArray(cetakList) && cetakList.length > 0) {
         const [allCetak] = await db.query(
-            "SELECT mhb_jenis, mhb_ket, mhb_biaya FROM tmintaharga_biaya WHERE mhb_biaya <> 0",
+            `SELECT 
+                mhb_jenis, 
+                COALESCE(NULLIF(mhb_ket, ''), mhb_jenis) AS mhb_ket, 
+                COALESCE(mhb_biaya, 0) AS mhb_biaya,
+                COALESCE(mhb_min, 0) AS mhb_min,
+                COALESCE(mhb_cm, 0) AS mhb_cm
+            FROM tmintaharga_biaya 
+            WHERE mhb_jenis IN ('SABLON', 'SUBLIM', 'DTF', 'BORDIR')`,
         );
         cetakList.forEach((cItem) => {
             const jenisName = (cItem?.jenis || "").trim().toUpperCase();
@@ -2417,12 +2424,16 @@ const calculateGarmen = async ({
                     ac.mhb_ket.trim().toUpperCase() === ketName,
             );
             if (matchedCetak) {
+                const itemBiaya =
+                    Number(cItem?.biaya) > 0
+                        ? Number(cItem.biaya)
+                        : Number(matchedCetak.mhb_biaya) || 0;
                 resolvedCetak.push({
                     jenis: matchedCetak.mhb_jenis,
                     ket: matchedCetak.mhb_ket,
-                    biaya: Number(matchedCetak.mhb_biaya) || 0,
+                    biaya: itemBiaya,
                 });
-            } else if (cItem?.biaya) {
+            } else if (cItem) {
                 resolvedCetak.push({
                     jenis: cItem.jenis || "CETAK",
                     ket: cItem.ket || "",
@@ -2634,15 +2645,25 @@ const getCetakOptions = async () => {
         `SELECT 
             mhb_jenis,
             mhb_jenis AS jenis,
-            mhb_ket,
-            mhb_ket AS ket,
-            mhb_ket AS nama,
-            mhb_ket AS keterangan,
-            mhb_biaya,
-            mhb_biaya AS biaya 
+            COALESCE(NULLIF(mhb_ket, ''), mhb_jenis) AS mhb_ket,
+            COALESCE(NULLIF(mhb_ket, ''), mhb_jenis) AS ket,
+            COALESCE(NULLIF(mhb_ket, ''), mhb_jenis) AS nama,
+            COALESCE(NULLIF(mhb_ket, ''), mhb_jenis) AS keterangan,
+            COALESCE(mhb_biaya, 0) AS mhb_biaya,
+            COALESCE(mhb_biaya, 0) AS biaya,
+            COALESCE(mhb_min, 0) AS mhb_min,
+            COALESCE(mhb_cm, 0) AS mhb_cm
         FROM tmintaharga_biaya 
-        WHERE mhb_biaya <> 0 AND mhb_jenis IN ('SABLON', 'SUBLIM') 
-        ORDER BY mhb_jenis, mhb_ket`,
+        WHERE mhb_jenis IN ('SABLON', 'SUBLIM', 'DTF', 'BORDIR') 
+        ORDER BY 
+            CASE 
+                WHEN mhb_jenis = 'SABLON' THEN 1
+                WHEN mhb_jenis = 'SUBLIM' THEN 2
+                WHEN mhb_jenis = 'DTF' THEN 3
+                WHEN mhb_jenis = 'BORDIR' THEN 4
+                ELSE 5 
+            END,
+            mhb_ket`,
     );
     return rows;
 };
