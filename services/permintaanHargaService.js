@@ -210,6 +210,12 @@ const generateKalkulasiNomor = async (conn, tanggal) => {
          WHERE kal_nomor LIKE ? AND LEFT(kal_nomor, 4) = 'KALS'`,
         [`%${tahunStr}${bulanStr}%`],
     );
+    const [kal2Rows] = await conn.query(
+        `SELECT IFNULL(MAX(CAST(RIGHT(kal_nomor, 4) AS UNSIGNED)), 0) AS max_val 
+         FROM kalkulasi.tkalkulasi2_hdr 
+         WHERE kal_nomor LIKE ? AND LEFT(kal_nomor, 4) = 'KALS'`,
+        [`%${tahunStr}${bulanStr}%`],
+    );
     const [mhRows] = await conn.query(
         `SELECT IFNULL(MAX(CAST(RIGHT(mh_nomor_kalkulasi, 4) AS UNSIGNED)), 0) AS max_val 
          FROM tmintaharga 
@@ -218,8 +224,9 @@ const generateKalkulasiNomor = async (conn, tanggal) => {
     );
 
     const maxKal = parseInt(kalRows?.[0]?.max_val || 0, 10);
+    const maxKal2 = parseInt(kal2Rows?.[0]?.max_val || 0, 10);
     const maxMh = parseInt(mhRows?.[0]?.max_val || 0, 10);
-    const nextVal = Math.max(maxKal, maxMh) + 1;
+    const nextVal = Math.max(maxKal, maxKal2, maxMh) + 1;
     return `${prefix}${String(nextVal).padStart(4, "0")}`;
 };
 
@@ -558,7 +565,8 @@ const createPermintaanHargaInTransaction = async ({
         }
 
         try {
-            await conn.query(
+            // 1. Simpan Header Kalkulasi ke tkalkulasi_hdr dan tkalkulasi2_hdr
+            const hdrQueries = [
                 `
                 INSERT INTO kalkulasi.tkalkulasi_hdr (
                     kal_nomor, kal_mh_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
@@ -585,9 +593,56 @@ const createPermintaanHargaInTransaction = async ({
                     user_modified = ?,
                     date_modified = NOW()
                 `,
-                [
+                `
+                INSERT INTO kalkulasi.tkalkulasi2_hdr (
+                    kal_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
+                    kal_order, kal_rencanaorder, kal_rpallowance, kal_allowance,
+                    kal_rplaba, kal_laba, kal_persen, kal_pakaiobat, kal_ppn,
+                    kal_rpsesuai, kal_rpsesuaippn, kal_ket, kal_ketbeli,
+                    user_create, date_create
+                ) VALUES (?, ?, NOW(), ?, ?, 0, ?, ?, ?, ?, ?, 'Y', 'N', ?, ?, ?, ?, ?, ?, NOW())
+                ON DUPLICATE KEY UPDATE
+                    kal_project = VALUES(kal_project),
+                    kal_cus = VALUES(kal_cus),
+                    kal_kh_kode = VALUES(kal_kh_kode),
+                    kal_rencanaorder = VALUES(kal_rencanaorder),
+                    kal_rpallowance = VALUES(kal_rpallowance),
+                    kal_allowance = VALUES(kal_allowance),
+                    kal_rplaba = VALUES(kal_rplaba),
+                    kal_laba = VALUES(kal_laba),
+                    kal_ppn = VALUES(kal_ppn),
+                    kal_rpsesuai = VALUES(kal_rpsesuai),
+                    kal_rpsesuaippn = VALUES(kal_rpsesuaippn),
+                    kal_ket = VALUES(kal_ket),
+                    kal_ketbeli = VALUES(kal_ketbeli),
+                    user_modified = ?,
+                    date_modified = NOW()
+                `
+            ];
+
+            await conn.query(hdrQueries[0], [
+                nomorKalkulasi,
+                nomor,
+                String(payload.mh_nama || "").trim(),
+                String(payload.mh_cus_nama || "").trim(),
+                modelKhKode,
+                toNumber(payload.mh_jmlorder, 0),
+                kalRpAllowance,
+                kalAllowance,
+                kalRpLaba,
+                kalLaba,
+                kalPpn,
+                kalRpSesuai,
+                kalRpSesuaiPpn,
+                ketKalkulasi,
+                kalKetBeli,
+                actor,
+                actor,
+            ]);
+
+            try {
+                await conn.query(hdrQueries[1], [
                     nomorKalkulasi,
-                    nomor,
                     String(payload.mh_nama || "").trim(),
                     String(payload.mh_cus_nama || "").trim(),
                     modelKhKode,
@@ -603,152 +658,224 @@ const createPermintaanHargaInTransaction = async ({
                     kalKetBeli,
                     actor,
                     actor,
-                ],
-            );
+                ]);
+            } catch (eHdr2) {
+                console.warn("[PermintaanHarga][SaveHdr2][Warn]", eHdr2.message);
+            }
 
             if (divisiNum === 4) {
                 try {
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi_komponen WHERE kk_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi_dtl WHERE kald_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi_aksesories WHERE ka_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi_ctk WHERE kc_nomor = ?",
-                        [nomorKalkulasi],
-                    );
+                    // Bersihkan tabel kalkulasi komponen, aksesoris, dtl, dan cetak lama
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi_komponen WHERE kk_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi2_komponen WHERE kk_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi_dtl WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi2_dtl WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi_aksesories WHERE ka_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi2_aksesories WHERE ka_nomor = ?", [nomorKalkulasi]);
 
+                    // Bersihkan tabel-tabel cetak khusus (kalkulasi & kalkulasi2)
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi_ctk WHERE kc_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi2_ctk WHERE kc_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi_cetak WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi2_cetak WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi_sublim WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi2_sublim WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi_dtf WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi2_dtf WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi_bordir WHERE kald_nomor = ?", [nomorKalkulasi]);
+                    await conn.query("DELETE FROM kalkulasi.tkalkulasi2_bordir WHERE kald_nomor = ?", [nomorKalkulasi]);
+
+                    // Insert Biaya Konveksi ke DTL
                     const biayaKonveksi =
                         ktgGarmen === "PE" ||
                         ktgGarmen === "HYGIT" ||
                         ktgGarmen === "DRYFIT"
                             ? 2800
                             : 5610;
-                    const ongkirVal = toNumber(payload.mh_ongkir, 0);
-                    await conn.query(
-                        `INSERT INTO kalkulasi.tkalkulasi_dtl (kald_nomor, kald_rppotong, kald_rpjahit, kald_rpfinishing, kald_rpkirim, kald_rpbiayaobat) 
-                         VALUES (?, 0, ?, 0, ?, 0)`,
-                        [nomorKalkulasi, biayaKonveksi, ongkirVal],
-                    );
+                    const totalOngkirVal = toNumber(payload.mh_ongkir !== undefined ? payload.mh_ongkir : payload.kald_rpkirim, 0);
+                    const numOrderQty = Math.max(1, toNumber(payload.mh_jmlorder, 1));
+                    const ongkirPerPcs = Math.round(totalOngkirVal / numOrderQty);
 
-                    const normJenisKain = String(
-                        payload.garmen_kain || payload.mh_kain || "",
-                    ).trim();
-                    const normWarna = String(payload.garmen_warna || "MUDA")
-                        .toUpperCase()
-                        .trim();
+                    const dtlSql = `INSERT INTO kalkulasi.tkalkulasi_dtl (kald_nomor, kald_rppotong, kald_rpjahit, kald_rpfinishing, kald_rpkirim, kald_rpbiayaobat) VALUES (?, 0, ?, 0, ?, 0)`;
+                    const dtl2Sql = `INSERT INTO kalkulasi.tkalkulasi2_dtl (kald_nomor, kald_rppotong, kald_rpjahit, kald_rpfinishing, kald_rpkirim, kald_rpbiayaobat) VALUES (?, 0, ?, 0, ?, 0)`;
+                    await conn.query(dtlSql, [nomorKalkulasi, biayaKonveksi, ongkirPerPcs]);
+                    try { await conn.query(dtl2Sql, [nomorKalkulasi, biayaKonveksi, ongkirPerPcs]); } catch (e) {}
+
+                    // Insert Komponen Kain
+                    const normJenisKain = String(payload.garmen_kain || payload.mh_kain || "").trim();
+                    const normWarna = String(payload.garmen_warna || "MUDA").toUpperCase().trim();
                     const kompValues = [];
                     if (bBodyGarmen > 0 || hargaBahanGarmen > 0) {
-                        const bodyPcs =
-                            bBodyGarmen > 0
-                                ? Math.round(
-                                      (hargaBahanGarmen / bBodyGarmen / 1.11) *
-                                          100,
-                                  ) / 100
-                                : 0;
-                        kompValues.push([
-                            nomorKalkulasi,
-                            "BODY",
-                            "Y",
-                            "Y",
-                            normJenisKain,
-                            "",
-                            normWarna,
-                            hargaBahanGarmen,
-                            bBodyGarmen,
-                            bodyPcs,
-                            0,
-                            0,
-                            1,
-                        ]);
+                        const bodyPcs = bBodyGarmen > 0 ? Math.round((hargaBahanGarmen / bBodyGarmen / 1.11) * 100) / 100 : 0;
+                        kompValues.push([nomorKalkulasi, "BODY", "Y", "Y", normJenisKain, "", normWarna, hargaBahanGarmen, bBodyGarmen, bodyPcs, 0, 0, 1]);
                     }
                     if (modelKhKode === "KH-0002" && bLenganGarmen > 0) {
-                        const lenganPcs =
-                            Math.round(
-                                (hargaBahanGarmen / bLenganGarmen) * 100,
-                            ) / 100;
-                        kompValues.push([
-                            nomorKalkulasi,
-                            "LENGAN",
-                            "Y",
-                            "Y",
-                            normJenisKain,
-                            "",
-                            normWarna,
-                            hargaBahanGarmen,
-                            bLenganGarmen,
-                            lenganPcs,
-                            0,
-                            0,
-                            2,
-                        ]);
+                        const lenganPcs = Math.round((hargaBahanGarmen / bLenganGarmen) * 100) / 100;
+                        kompValues.push([nomorKalkulasi, "LENGAN", "Y", "Y", normJenisKain, "", normWarna, hargaBahanGarmen, bLenganGarmen, lenganPcs, 0, 0, 2]);
                     }
                     if (bRibGarmen > 0) {
-                        const ribPcs =
-                            Math.round(
-                                ((hargaBahanGarmen / 1.11 + 1500) / 70) * 100,
-                            ) / 100;
-                        kompValues.push([
-                            nomorKalkulasi,
-                            "RIB",
-                            "Y",
-                            "Y",
-                            "RIB",
-                            "",
-                            normWarna,
-                            hargaBahanGarmen,
-                            bRibGarmen,
-                            ribPcs,
-                            0,
-                            0,
-                            kompValues.length + 1,
-                        ]);
+                        const ribPcs = Math.round(((hargaBahanGarmen / 1.11 + 1500) / 70) * 100) / 100;
+                        kompValues.push([nomorKalkulasi, "RIB", "Y", "Y", "RIB", "", normWarna, hargaBahanGarmen, bRibGarmen, ribPcs, 0, 0, kompValues.length + 1]);
                     }
                     if (kompValues.length > 0) {
-                        await conn.query(
-                            `INSERT INTO kalkulasi.tkalkulasi_komponen (kk_nomor, kk_komponen, kk_kg, kk_pabrik, kk_jeniskain, kk_lengan, kk_warna, kk_harga, kk_babaran, kk_pcs, kald_logbody, kald_loglengan, kk_nourut) VALUES ?`,
-                            [kompValues],
-                        );
+                        const kompSql = `INSERT INTO kalkulasi.tkalkulasi_komponen (kk_nomor, kk_komponen, kk_kg, kk_pabrik, kk_jeniskain, kk_lengan, kk_warna, kk_harga, kk_babaran, kk_pcs, kald_logbody, kald_loglengan, kk_nourut) VALUES ?`;
+                        const komp2Sql = `INSERT INTO kalkulasi.tkalkulasi2_komponen (kk_nomor, kk_komponen, kk_kg, kk_pabrik, kk_jeniskain, kk_lengan, kk_warna, kk_harga, kk_babaran, kk_pcs, kald_logbody, kald_loglengan, kk_nourut) VALUES ?`;
+                        await conn.query(kompSql, [kompValues]);
+                        try { await conn.query(komp2Sql, [kompValues]); } catch (e) {}
                     }
 
-                    const tambahanItems = Array.isArray(payload.garmen_tambahan)
-                        ? payload.garmen_tambahan
-                        : [];
-                    if (tambahanItems.length > 0) {
+                    // Insert Aksesoris
+                    let tambahanItems = payload.garmen_tambahan || [];
+                    if (typeof tambahanItems === "string") {
+                        try {
+                            tambahanItems = JSON.parse(tambahanItems);
+                        } catch (e) {
+                            tambahanItems = [];
+                        }
+                    }
+                    if (Array.isArray(tambahanItems) && tambahanItems.length > 0) {
                         const aksValues = tambahanItems.map((t, idx) => [
                             nomorKalkulasi,
                             t.ket || t.nama || "",
                             Number(t.tarif) || 0,
                             idx + 1,
                         ]);
-                        await conn.query(
-                            `INSERT INTO kalkulasi.tkalkulasi_aksesories (ka_nomor, ka_aksesories, ka_biaya, ka_nourut) VALUES ?`,
-                            [aksValues],
-                        );
+                        const aksSql = `INSERT INTO kalkulasi.tkalkulasi_aksesories (ka_nomor, ka_aksesories, ka_biaya, ka_nourut) VALUES ?`;
+                        const aks2Sql = `INSERT INTO kalkulasi.tkalkulasi2_aksesories (ka_nomor, ka_aksesories, ka_biaya, ka_nourut) VALUES ?`;
+                        await conn.query(aksSql, [aksValues]);
+                        try { await conn.query(aks2Sql, [aksValues]); } catch (e) {}
                     }
 
-                    const cetakItems = Array.isArray(payload.garmen_cetak)
-                        ? payload.garmen_cetak
-                        : [];
-                    if (cetakItems.length > 0) {
-                        const ctkValues = cetakItems.map((c, idx) => [
-                            nomorKalkulasi,
-                            `${c.jenis || "CETAK"} ${c.ket || ""}`.trim(),
-                            Number(c.biaya) || 0,
-                            idx + 1,
-                        ]);
-                        await conn.query(
-                            `INSERT INTO kalkulasi.tkalkulasi_ctk (kc_nomor, kc_ket, kc_biaya, kc_nourut) VALUES ?`,
-                            [ctkValues],
-                        );
+                    // ==========================================
+                    // PENYIMPANAN DATA CETAK / SUBLIM / DTF / BORDIR TERPISAH
+                    // (Tanpa menggunakan tkalkulasi_ctk)
+                    // ==========================================
+                    let cetakItems = payload.garmen_cetak || [];
+                    if (typeof cetakItems === "string") {
+                        try {
+                            cetakItems = JSON.parse(cetakItems);
+                        } catch (e) {
+                            cetakItems = [];
+                        }
                     }
+                    if (!Array.isArray(cetakItems)) {
+                        cetakItems = [];
+                    }
+                    let totalSablon = 0;
+                    let totalSublim = 0;
+                    let dtfItem = null;
+                    let bordirItem = null;
+
+                    cetakItems.forEach((c) => {
+                        const j = String(c.jenis || "").toUpperCase().trim();
+                        const b = Number(c.biaya) || 0;
+                        if (j === "SABLON") {
+                            totalSablon += b;
+                        } else if (j === "SUBLIM") {
+                            totalSublim += b;
+                        } else if (j === "DTF") {
+                            let p = Number(c.panjang) || 0;
+                            let l = Number(c.lebar) || 0;
+                            let cm = Number(c.tarifCm) || 25;
+                            if ((!p || !l) && c.ket) {
+                                const m = String(c.ket).match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
+                                if (m) {
+                                    p = Number(m[1]) || 0;
+                                    l = Number(m[2]) || 0;
+                                }
+                            }
+                            if (!dtfItem) {
+                                dtfItem = { cm, p, l, biaya: b };
+                            } else {
+                                dtfItem.biaya += b;
+                            }
+                        } else if (j === "BORDIR") {
+                            let p = Number(c.panjang) || 0;
+                            let l = Number(c.lebar) || 0;
+                            let cm = Number(c.tarifCm) || 90;
+                            if ((!p || !l) && c.ket) {
+                                const m = String(c.ket).match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
+                                if (m) {
+                                    p = Number(m[1]) || 0;
+                                    l = Number(m[2]) || 0;
+                                }
+                            }
+                            if (!bordirItem) {
+                                bordirItem = { cm, p, l, biaya: b };
+                            } else {
+                                bordirItem.biaya += b;
+                            }
+                        }
+                    });
+
+                    // 1. Simpan SABLON ke tkalkulasi_cetak & tkalkulasi2_cetak
+                    if (totalSablon > 0) {
+                        const ctkSql = `INSERT INTO kalkulasi.tkalkulasi_cetak (kald_nomor, kald_rpcetak) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpcetak = VALUES(kald_rpcetak)`;
+                        const ctk2Sql = `INSERT INTO kalkulasi.tkalkulasi2_cetak (kald_nomor, kald_rpcetak) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpcetak = VALUES(kald_rpcetak)`;
+                        await conn.query(ctkSql, [nomorKalkulasi, totalSablon]);
+                        try { await conn.query(ctk2Sql, [nomorKalkulasi, totalSablon]); } catch (e) {}
+                    }
+
+                    // 2. Simpan SUBLIM ke tkalkulasi_sublim & tkalkulasi2_sublim
+                    if (totalSublim > 0) {
+                        const subSql = `INSERT INTO kalkulasi.tkalkulasi_sublim (kald_nomor, kald_rpsublim) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpsublim = VALUES(kald_rpsublim)`;
+                        const sub2Sql = `INSERT INTO kalkulasi.tkalkulasi2_sublim (kald_nomor, kald_rpsublim) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpsublim = VALUES(kald_rpsublim)`;
+                        await conn.query(subSql, [nomorKalkulasi, totalSublim]);
+                        try { await conn.query(sub2Sql, [nomorKalkulasi, totalSublim]); } catch (e) {}
+                    }
+
+                    // 3. Simpan DTF ke tkalkulasi_dtf & tkalkulasi2_dtf
+                    if (dtfItem && dtfItem.biaya > 0) {
+                        const dtfSql = `
+                            INSERT INTO kalkulasi.tkalkulasi_dtf (
+                                kald_nomor, kald_cmdtf, kald_dtfp1, kald_dtfl1, kald_rpdtf
+                            ) VALUES (?, ?, ?, ?, ?)
+                            ON DUPLICATE KEY UPDATE
+                                kald_cmdtf = VALUES(kald_cmdtf),
+                                kald_dtfp1 = VALUES(kald_dtfp1),
+                                kald_dtfl1 = VALUES(kald_dtfl1),
+                                kald_rpdtf = VALUES(kald_rpdtf)
+                        `;
+                        const dtf2Sql = `
+                            INSERT INTO kalkulasi.tkalkulasi2_dtf (
+                                kald_nomor, kald_cmdtf, kald_dtfp1, kald_dtfl1, kald_rpdtf
+                            ) VALUES (?, ?, ?, ?, ?)
+                            ON DUPLICATE KEY UPDATE
+                                kald_cmdtf = VALUES(kald_cmdtf),
+                                kald_dtfp1 = VALUES(kald_dtfp1),
+                                kald_dtfl1 = VALUES(kald_dtfl1),
+                                kald_rpdtf = VALUES(kald_rpdtf)
+                        `;
+                        await conn.query(dtfSql, [nomorKalkulasi, dtfItem.cm, dtfItem.p, dtfItem.l, dtfItem.biaya]);
+                        try { await conn.query(dtf2Sql, [nomorKalkulasi, dtfItem.cm, dtfItem.p, dtfItem.l, dtfItem.biaya]); } catch (e) {}
+                    }
+
+                    // 4. Simpan BORDIR ke tkalkulasi_bordir & tkalkulasi2_bordir
+                    if (bordirItem && bordirItem.biaya > 0) {
+                        const borSql = `
+                            INSERT INTO kalkulasi.tkalkulasi_bordir (
+                                kald_nomor, kald_cmbordir, kald_bordirp1, kald_bordirl1, kald_rpbordir
+                            ) VALUES (?, ?, ?, ?, ?)
+                            ON DUPLICATE KEY UPDATE
+                                kald_cmbordir = VALUES(kald_cmbordir),
+                                kald_bordirp1 = VALUES(kald_bordirp1),
+                                kald_bordirl1 = VALUES(kald_bordirl1),
+                                kald_rpbordir = VALUES(kald_rpbordir)
+                        `;
+                        const bor2Sql = `
+                            INSERT INTO kalkulasi.tkalkulasi2_bordir (
+                                kald_nomor, kald_cmbordir, kald_bordirp1, kald_bordirl1, kald_rpbordir
+                            ) VALUES (?, ?, ?, ?, ?)
+                            ON DUPLICATE KEY UPDATE
+                                kald_cmbordir = VALUES(kald_cmbordir),
+                                kald_bordirp1 = VALUES(kald_bordirp1),
+                                kald_bordirl1 = VALUES(kald_bordirl1),
+                                kald_rpbordir = VALUES(kald_rpbordir)
+                        `;
+                        await conn.query(borSql, [nomorKalkulasi, bordirItem.cm, bordirItem.p, bordirItem.l, bordirItem.biaya]);
+                        try { await conn.query(bor2Sql, [nomorKalkulasi, bordirItem.cm, bordirItem.p, bordirItem.l, bordirItem.biaya]); } catch (e) {}
+                    }
+
                 } catch (dtlErr) {
                     console.warn(
                         "[PermintaanHarga][SaveGarmenDetails][Warn]",
@@ -841,11 +968,11 @@ const createPermintaanHargaInTransaction = async ({
         `
         INSERT INTO tmintaharga (
             mh_divisi, mh_nomor, mh_tanggal, mh_cus_kode, mh_cus_nama, mh_sal_kode,
-            mh_nama, mh_jmlorder, mh_harga, mh_ongkir, mh_budget, mh_dateorder, mh_kain,
+            mh_nama, mh_jmlorder, mh_harga, mh_budget, mh_dateorder, mh_kain,
             mh_panjang, mh_lebar, mh_ukuran, mh_gramasi, mh_finishing, mh_sublim,
             mh_ket, mh_warna, mh_status, date_create, user_create,
             mh_harga_kalkulasi, mh_ket_kalkulasi, mh_nomor_kalkulasi, mh_date_kalkulasi
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
         `,
         [
             divisiNum,
@@ -857,7 +984,6 @@ const createPermintaanHargaInTransaction = async ({
             String(payload.mh_nama || "").trim(),
             toNumber(payload.mh_jmlorder, 0),
             toNumber(payload.mh_harga, 0),
-            toNumber(payload.mh_ongkir, 0),
             toNumber(payload.mh_budget, 0),
             payload.mh_dateorder ? normalizeDate(payload.mh_dateorder) : null,
             finalKain,
@@ -980,7 +1106,6 @@ const getPermintaanHargaDetail = async ({
             h.mh_nama,
             h.mh_jmlorder,
             h.mh_harga,
-            COALESCE(h.mh_ongkir, 0) AS mh_ongkir,
             h.mh_budget,
             DATE_FORMAT(h.mh_dateorder, '%Y-%m-%d') AS mh_dateorder,
             h.mh_kain,
@@ -1018,6 +1143,22 @@ const getPermintaanHargaDetail = async ({
     }
 
     const row = rows[0];
+    row.kald_rpkirim = 0;
+    row.mh_ongkir = 0;
+    if (row.mh_nomor_kalkulasi) {
+        try {
+            const [dtlRows] = await db.query(
+                `SELECT kald_rpkirim FROM kalkulasi.tkalkulasi_dtl WHERE kald_nomor = ? LIMIT 1`,
+                [row.mh_nomor_kalkulasi]
+            );
+            if (dtlRows?.[0]?.kald_rpkirim !== undefined && dtlRows?.[0]?.kald_rpkirim !== null) {
+                const perPcs = Number(dtlRows[0].kald_rpkirim) || 0;
+                const qty = Math.max(1, Number(row.mh_jmlorder || 1));
+                row.kald_rpkirim = perPcs;
+                row.mh_ongkir = Math.round(perPcs * qty);
+            }
+        } catch (e) {}
+    }
     const baseUrl = buildImageBaseUrl();
     const imagePaths = buildImagePaths(row.mh_nomor);
     const withBase = (p) => (baseUrl ? `${baseUrl}${p}` : p);
@@ -1211,6 +1352,25 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
         updateSalesKode = String(rows[0].mh_sal_kode || "").trim();
     }
 
+    const updateOngkirTotal = toNumber(body.mh_ongkir !== undefined ? body.mh_ongkir : body.kald_rpkirim, 0);
+    const updateOrderQty = Math.max(1, toNumber(body.mh_jmlorder || rows[0].mh_jmlorder, 1));
+    const updateOngkirPerPcs = Math.round(updateOngkirTotal / updateOrderQty);
+    const existingNomorKal = String(rows[0].mh_nomor_kalkulasi || body.mh_nomor_kalkulasi || "").trim();
+    if (existingNomorKal) {
+        try {
+            await db.query(
+                `UPDATE kalkulasi.tkalkulasi_dtl SET kald_rpkirim = ? WHERE kald_nomor = ?`,
+                [updateOngkirPerPcs, existingNomorKal]
+            );
+            await db.query(
+                `UPDATE kalkulasi.tkalkulasi2_dtl SET kald_rpkirim = ? WHERE kald_nomor = ?`,
+                [updateOngkirPerPcs, existingNomorKal]
+            );
+        } catch (dtlOngkirErr) {
+            console.warn("[PermintaanHarga][UpdateDtlOngkir][Warn]", dtlOngkirErr.message);
+        }
+    }
+
     await db.query(
         `
         UPDATE tmintaharga
@@ -1223,7 +1383,6 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             mh_nama = ?,
             mh_jmlorder = ?,
             mh_harga = ?,
-            mh_ongkir = ?,
             mh_budget = ?,
             mh_dateorder = ?,
             mh_kain = ?,
@@ -1250,7 +1409,6 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             String(body.mh_nama || "").trim(),
             toNumber(body.mh_jmlorder, 0),
             toNumber(body.mh_harga, 0),
-            toNumber(body.mh_ongkir, 0),
             toNumber(body.mh_budget, 0),
             normalizeDate(body.mh_dateorder),
             updateKain,
