@@ -3461,7 +3461,42 @@ const getTambahanOptions = async ({
     });
 };
 
-const getCetakOptions = async () => {
+const getCetakOptions = async (options = {}) => {
+    const { jenisKain = "", kategori = "" } =
+        typeof options === "object" ? options : {};
+
+    let resolvedKtg = String(kategori || "")
+        .toUpperCase()
+        .trim();
+    const normJenisKain = String(jenisKain || "").trim();
+
+    if (!resolvedKtg && normJenisKain) {
+        const [kainRows] = await db.query(
+            `SELECT mhk_ktg FROM tmintaharga_kain 
+             WHERE LOWER(TRIM(mhk_kain)) = LOWER(TRIM(?)) 
+             LIMIT 1`,
+            [normJenisKain],
+        );
+        if (kainRows.length > 0 && kainRows[0].mhk_ktg) {
+            resolvedKtg = kainRows[0].mhk_ktg.toUpperCase().trim();
+        }
+    }
+
+    const jkUpper = normJenisKain.toUpperCase();
+    const isLacost =
+        resolvedKtg.includes("LACOST") ||
+        jkUpper.includes("LACOST") ||
+        jkUpper.includes("PIQUE");
+    const isPe =
+        resolvedKtg.includes("PE") ||
+        resolvedKtg.includes("HYGIT") ||
+        resolvedKtg.includes("DRYFIT") ||
+        jkUpper.includes("PE ") ||
+        jkUpper.includes("HYGIT") ||
+        jkUpper.includes("DRYFIT");
+
+    const targetKategori = isLacost ? "LACOST" : isPe ? "PE" : "COTTON";
+
     const [rows] = await db.query(
         `SELECT 
             mhb_jenis,
@@ -3486,7 +3521,36 @@ const getCetakOptions = async () => {
             END,
             mhb_ket`,
     );
-    return rows;
+
+    // Filter khusus item SABLON agar hanya menampilkan yang sesuai target kategori kain
+    // dan membuang entri generik tanpa akhiran kain yang menduplikasi list
+    const filteredRows = rows.filter((r) => {
+        const j = String(r.mhb_jenis || "").toUpperCase();
+        if (j !== "SABLON") return true; // SUBLIM, DTF, BORDIR tetap tampil
+
+        const ketUpper = String(r.mhb_ket || "")
+            .toUpperCase()
+            .trim();
+
+        const hasCotton =
+            ketUpper.endsWith("COTTON") || ketUpper.includes(" COTTON");
+        const hasPe = ketUpper.endsWith("PE") || ketUpper.includes(" PE");
+        const hasLacost =
+            ketUpper.endsWith("LACOST") ||
+            ketUpper.includes(" LACOST") ||
+            ketUpper.includes(" LACOSTE");
+
+        if (targetKategori === "LACOST") {
+            return hasLacost;
+        } else if (targetKategori === "PE") {
+            return hasPe;
+        } else {
+            // Default COTTON
+            return hasCotton;
+        }
+    });
+
+    return filteredRows;
 };
 
 const getCustomerSoHistory = async (options = {}) => {

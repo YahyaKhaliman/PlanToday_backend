@@ -423,7 +423,11 @@ const getTambahanOptions = async (req, res) => {
 
 const getCetakOptions = async (req, res) => {
     try {
-        const data = await permintaanHargaService.getCetakOptions();
+        const { jenisKain, kategori } = req.query;
+        const data = await permintaanHargaService.getCetakOptions({
+            jenisKain,
+            kategori,
+        });
         return res.json({ success: true, data });
     } catch (err) {
         console.error("[PermintaanHarga][Lookup][Cetak][Error]", err);
