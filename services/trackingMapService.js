@@ -73,9 +73,9 @@ const getTrackingMapList = async ({
         LEFT JOIN tsales s
             ON s.sal_kode = COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '')
         LEFT JOIN tcustomer ch
-            ON ch.cus_kode = h.pen_cus_kode
+            ON ch.cus_kode = h.pen_cus_kode AND ch.cus_aktif = 1
         LEFT JOIN tcustomer cm
-            ON cm.cus_kode = m.mspk_cus_kode
+            ON cm.cus_kode = m.mspk_cus_kode AND cm.cus_aktif = 1
         LEFT JOIN tkesesuaianmap k
             ON k.mspk_nomor = m.mspk_nomor
         LEFT JOIN tsj_dtl_memo sd

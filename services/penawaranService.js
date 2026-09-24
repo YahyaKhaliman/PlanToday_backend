@@ -724,10 +724,12 @@ const getNextPenawaranNumber = async (conn, perusahaanKode, tahun) => {
 const getPenawaranList = async ({
     managerRole,
     authSalesKode,
+    filterSalesKode,
     startDate,
     endDate,
     search,
     statusInfo,
+    approvalStatus,
     limit,
 }) => {
     let statusCountParam = "";
@@ -742,8 +744,23 @@ const getPenawaranList = async ({
 
     queryParams.push(startDate, endDate);
 
-    if (!managerRole) {
+    let ownerFilterSql = "";
+    if (managerRole) {
+        if (filterSalesKode && filterSalesKode !== "ALL") {
+            ownerFilterSql = "AND COALESCE(h.pen_sal_kode, '') = ?";
+            queryParams.push(filterSalesKode);
+        }
+    } else {
+        ownerFilterSql = "AND COALESCE(h.pen_sal_kode, '') = ?";
         queryParams.push(authSalesKode);
+    }
+
+    let approvalFilterSql = "";
+    const normApproval = String(approvalStatus || "").trim().toUpperCase();
+    if (normApproval === "APPROVED" || normApproval === "Y") {
+        approvalFilterSql = "AND COALESCE(h.pen_digitalsign, '') = 'Y'";
+    } else if (normApproval === "UNAPPROVED" || normApproval === "N") {
+        approvalFilterSql = "AND COALESCE(h.pen_digitalsign, '') <> 'Y'";
     }
 
     if (statusInfo.value) {
@@ -765,10 +782,6 @@ const getPenawaranList = async ({
 
     queryParams.push(limit);
 
-    const ownerFilterSql = managerRole
-        ? ""
-        : "AND COALESCE(h.pen_sal_kode, '') = ?";
-
     const sql = `
     SELECT
         h.pen_nomor AS nomor,
@@ -783,6 +796,9 @@ const getPenawaranList = async ({
         COALESCE(h.pen_fu2, '') AS fu2,
         COALESCE(h.pen_fu3, '') AS fu3,
         COALESCE(h.pen_proyeksi, '') AS proyeksi,
+        COALESCE(h.pen_digitalsign, '') AS digital_sign,
+        DATE_FORMAT(h.pen_digitalsign_Date, '%Y-%m-%d %H:%i:%s') AS digital_sign_date,
+        CASE WHEN COALESCE(h.pen_digitalsign, '') = 'Y' THEN 1 ELSE 0 END AS is_approved,
         IF(
             h.pen_cetaktotal = 1,
             COALESCE((SELECT SUM(d.pend_qty * d.pend_harga) FROM tpenawaran_dtl d WHERE d.pend_pen_nomor = h.pen_nomor), 0),
@@ -807,13 +823,14 @@ const getPenawaranList = async ({
             LIMIT 1
         ), '') AS approval_state
     FROM tpenawaran_hdr h
-    INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
+    INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
     INNER JOIN tperusahaan p ON p.perush_kode = h.pen_perush_kode
     LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
     LEFT JOIN tdivisi v ON v.kode = h.pen_divisi
     WHERE h.pen_tanggal >= ?
       AND h.pen_tanggal <= ?
       ${ownerFilterSql}
+      ${approvalFilterSql}
       AND EXISTS (
           SELECT 1
           FROM tpenawaran_dtl d
@@ -888,7 +905,7 @@ const getPenawaranDetail = async ({ managerRole, authSalesKode, nomor }) => {
                 LIMIT 1
             ), '') AS approval_state
         FROM tpenawaran_hdr h
-        INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
+        INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
         INNER JOIN tperusahaan p ON p.perush_kode = h.pen_perush_kode
         LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
         LEFT JOIN tdivisi v ON v.kode = h.pen_divisi
@@ -1196,6 +1213,11 @@ const createPenawaran = async ({
             }
         }
 
+        const statusHarga = toNumber(
+            body.status_harga ?? body.statusHarga ?? (body.is_include_ppn ? 1 : 0),
+            0,
+        );
+
         const tahun = Number(String(tanggal).slice(0, 4));
         const nomor = await getNextPenawaranNumber(conn, perusahaanKode, tahun);
 
@@ -1245,7 +1267,7 @@ const createPenawaran = async ({
                 note,
                 "",
                 0,
-                0,
+                statusHarga,
                 ttd,
                 ttdJabatan,
                 up,
@@ -1440,7 +1462,7 @@ const getMasterCustomer = async (search = "") => {
             COALESCE(c.cus_telp, '') AS cc_telp,
             'CUSTOMER' AS sumber
         FROM tcustomer c
-        WHERE (? = '' OR c.cus_kode LIKE ? OR c.cus_nama LIKE ?)
+        WHERE c.cus_aktif = 1 AND (? = '' OR c.cus_kode LIKE ? OR c.cus_nama LIKE ?)
         ORDER BY c.cus_nama ASC
         LIMIT 50
         `,
@@ -1488,7 +1510,7 @@ const getMasterPenawaranNomor = async (search = "") => {
             COALESCE(c.cus_nama, '') AS customer,
             COALESCE(p.perush_nama, '') AS perusahaan
         FROM tpenawaran_hdr h
-        LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
+        LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
         LEFT JOIN tperusahaan p ON p.perush_kode = h.pen_perush_kode
         WHERE (
             ? = ''
@@ -1559,6 +1581,9 @@ const getMasterPermintaanHargaForPenawaran = async ({
             COALESCE(m.mh_lebar, 0) AS lebar,
             COALESCE(m.mh_jmlorder, 0) AS qty,
             COALESCE(NULLIF(m.mh_harga_kalkulasi, 0), m.mh_harga, 0) AS harga_referensi,
+            COALESCE(m.mh_nomor_kalkulasi, '') AS nomor_kalkulasi,
+            COALESCE(m.mh_ket_kalkulasi, '') AS ket_kalkulasi,
+            IF(m.mh_ket_kalkulasi REGEXP '(?i)inc[[:space:]]*ppn|incppn', 1, 0) AS is_include_ppn,
             IF(UPPER(TRIM(COALESCE(m.mh_status, ''))) IN ('SELESAI', 'DONE'), 1, 0) AS is_non_belum
         FROM tmintaharga m
         LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
@@ -1599,6 +1624,9 @@ const getMasterPermintaanHargaForPenawaran = async ({
                 COALESCE(m.mh_jmlorder, 0) AS qty,
                 COALESCE(NULLIF(m.mh_harga_kalkulasi, 0), m.mh_harga, 0) AS harga_referensi,
                 COALESCE(m.mh_ket, '') AS keterangan,
+                COALESCE(m.mh_nomor_kalkulasi, '') AS nomor_kalkulasi,
+                COALESCE(m.mh_ket_kalkulasi, '') AS ket_kalkulasi,
+                IF(m.mh_ket_kalkulasi REGEXP '(?i)inc[[:space:]]*ppn|incppn', 1, 0) AS is_include_ppn,
                 IF(UPPER(TRIM(COALESCE(m.mh_status, ''))) IN ('SELESAI', 'DONE'), 1, 0) AS is_non_belum
             FROM tmintaharga m
             LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
@@ -1664,6 +1692,9 @@ const getMasterPermintaanHargaForPenawaran = async ({
                             qty: toNumber(d.qty, 0),
                             harga_referensi: toNumber(d.harga_referensi, 0),
                             keterangan: d.keterangan,
+                            nomor_kalkulasi: d.nomor_kalkulasi || "",
+                            ket_kalkulasi: d.ket_kalkulasi || "",
+                            is_include_ppn: Boolean(d.is_include_ppn),
                         },
                         warning:
                             normalizedStatus !== "BELUM"
@@ -2168,6 +2199,63 @@ const getPenawaranActivityLogs = async ({
     };
 };
 
+const approvePenawaran = async ({ nomor, user }) => {
+    let conn;
+    try {
+        conn = await db.getConnection();
+        await conn.beginTransaction();
+
+        const [headerRows] = await conn.query(
+            `SELECT pen_nomor, COALESCE(pen_digitalsign, '') AS digital_sign, pen_ttd FROM tpenawaran_hdr WHERE pen_nomor = ? LIMIT 1`,
+            [nomor],
+        );
+
+        if (!headerRows || headerRows.length === 0) {
+            await conn.rollback();
+            return {
+                status: 404,
+                body: {
+                    success: false,
+                    message: "Penawaran tidak ditemukan",
+                },
+            };
+        }
+
+        const userNama = String(user?.nama || user?.id || "MANAGER").trim();
+
+        await conn.query(
+            `
+            UPDATE tpenawaran_hdr
+            SET pen_digitalsign = 'Y',
+                pen_digitalsign_Date = NOW(),
+                date_modified = NOW(),
+                user_modified = ?
+            WHERE pen_nomor = ?
+            `,
+            [String(userNama).slice(0, 10), nomor],
+        );
+
+        await conn.commit();
+
+        return {
+            status: 200,
+            body: {
+                success: true,
+                message: "Penawaran berhasil diapprove",
+                data: {
+                    nomor,
+                    digital_sign: "Y",
+                },
+            },
+        };
+    } catch (err) {
+        if (conn) await conn.rollback();
+        throw err;
+    } finally {
+        if (conn) conn.release();
+    }
+};
+
 module.exports = {
     ensurePenawaranSchema,
     isManagerUser,
@@ -2188,4 +2276,5 @@ module.exports = {
     getMasterPenawaranConfirm,
     requestApprovalPerubahan,
     getPenawaranActivityLogs,
+    approvePenawaran,
 };

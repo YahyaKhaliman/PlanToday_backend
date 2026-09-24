@@ -13,8 +13,10 @@ router.get(
     controller.getPermintaanHargaStatusCounts,
 );
 
-// --- ROUTES ENGINE KALKULASI SPANDUK & MMT ---
+// --- ROUTES ENGINE KALKULASI SPANDUK & MMT & GARMEN & ONGKIR ---
 router.get("/permintaan-harga/kalkulasi/options", auth, controller.getKalkulasiOptions);
+router.get("/permintaan-harga/kalkulasi/ongkir/options", auth, controller.getOngkirOptions);
+router.post("/permintaan-harga/kalkulasi/ongkir/calculate", auth, controller.calculateOngkir);
 router.post("/permintaan-harga/kalkulasi/spanduk/calculate", auth, controller.calculateSpanduk);
 router.post("/permintaan-harga/kalkulasi/mmt/calculate", auth, controller.calculateMmt);
 router.post("/permintaan-harga/kalkulasi/garmen/calculate", auth, controller.calculateGarmen);

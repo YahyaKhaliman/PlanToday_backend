@@ -469,28 +469,44 @@ const createPermintaanHargaInTransaction = async ({
 
                     let dbBiayaJahit = undefined;
                     try {
+                        const isPartaiBesarJahit = numQty >= 1000;
+                        const colPartaiBesar =
+                            normKodeModel === "KH-0002"
+                                ? "mhb_biaya_partaibesar_kh0002"
+                                : "mhb_biaya_partaibesar_kh0001";
                         const [jRows] = await conn.query(
-                            "SELECT mhb_ket, mhb_biaya FROM tmintaharga_biaya WHERE mhb_jenis = 'JAHIT'",
+                            `SELECT mhb_ket, mhb_biaya, 
+                                    COALESCE(${colPartaiBesar}, 0) AS mhb_biaya_partaibesar 
+                             FROM tmintaharga_biaya 
+                             WHERE mhb_jenis = 'JAHIT'`,
                         );
                         if (jRows && jRows.length > 0) {
-                            let pattern = /oblong/i;
-                            if (normKodeModel === "KH-0002")
-                                pattern = /raglan/i;
-                            else if (normKodeModel === "KH-0003")
-                                pattern = /polo/i;
-                            else if (normKodeModel === "KH-0004")
-                                pattern = /kemeja/i;
-                            else if (normKodeModel === "KH-0005")
-                                pattern = /jaket/i;
+                            const ktgUpper = (ktgGarmen || "").toUpperCase().trim();
+                            const matchedJahit =
+                                jRows.find((r) => {
+                                    const ket = (r.mhb_ket || "").trim().toUpperCase();
+                                    if (isSport) {
+                                        return (
+                                            ket === ktgUpper ||
+                                            ket === "PE" ||
+                                            ket === "HYGIT" ||
+                                            ket === "DRYFIT"
+                                        );
+                                    }
+                                    if (ktgUpper.includes("LACOST")) return ket === "LACOST";
+                                    if (ktgUpper.includes("COTTON")) return ket === "COTTON" || ket === "-";
+                                    return ket === "-" || ket === "";
+                                }) ||
+                                jRows.find((r) => (r.mhb_ket || "").trim() === "-") ||
+                                jRows[0];
 
-                            const matchedJahit = jRows.find((r) =>
-                                pattern.test(r.mhb_ket || ""),
-                            );
-                            if (
-                                matchedJahit &&
-                                Number(matchedJahit.mhb_biaya) > 0
-                            ) {
-                                dbBiayaJahit = Number(matchedJahit.mhb_biaya);
+                            if (matchedJahit) {
+                                const biayaNormal = Number(matchedJahit.mhb_biaya) || 0;
+                                const biayaBesar = Number(matchedJahit.mhb_biaya_partaibesar) || 0;
+                                dbBiayaJahit =
+                                    isPartaiBesarJahit && biayaBesar > 0
+                                        ? biayaBesar
+                                        : biayaNormal;
                             }
                         }
                     } catch (jErr) {
@@ -1143,8 +1159,77 @@ const createPermintaanHargaInTransaction = async ({
         }
     }
 
-    await conn.query(
-        `
+    // Workshop garmen: PREMIUM=P04, MEDIUM=P01 (hanya divisi 4) - default MEDIUM (P01)
+    let workshopGarmen = null;
+    if (divisiNum === 4) {
+        const rawWorkshop = String(
+            payload.mh_workshop ??
+                payload.garmen_workshop ??
+                payload.workshop ??
+                payload.garmen_tier ??
+                payload.tier ??
+                "",
+        )
+            .trim()
+            .toUpperCase();
+        if (rawWorkshop === "P04" || rawWorkshop === "PREMIUM") workshopGarmen = "P04";
+        else if (rawWorkshop === "P01" || rawWorkshop === "MEDIUM") workshopGarmen = "P01";
+        else workshopGarmen = "P01";
+    }
+
+    // Coba insert dengan kolom mh_workshop, fallback jika kolom belum ada di DB (ER_BAD_FIELD_ERROR)
+    try {
+        await conn.query(
+            `
+        INSERT INTO tmintaharga (
+            mh_divisi, mh_nomor, mh_tanggal, mh_cus_kode, mh_cus_nama, mh_sal_kode,
+            mh_nama, mh_jmlorder, mh_harga, mh_budget, mh_dateorder, mh_kain,
+            mh_panjang, mh_lebar, mh_ukuran, mh_gramasi, mh_finishing, mh_sublim,
+            mh_ket, mh_warna, mh_workshop, mh_status, date_create, user_create,
+            mh_harga_kalkulasi, mh_ket_kalkulasi, mh_nomor_kalkulasi, mh_date_kalkulasi
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
+        `,
+            [
+                divisiNum,
+                nomor,
+                payload.tanggal,
+                String(payload.mh_cus_kode || "").trim(),
+                String(payload.mh_cus_nama || "").trim(),
+                salesKode,
+                String(payload.mh_nama || "").trim(),
+                toNumber(payload.mh_jmlorder, 0),
+                toNumber(payload.mh_harga, 0),
+                toNumber(payload.mh_budget, 0),
+                payload.mh_dateorder ? normalizeDate(payload.mh_dateorder) : null,
+                finalKain,
+                toDecimalNumber(payload.mh_panjang, 0),
+                finalLebar,
+                finalUkuran,
+                String(payload.mh_gramasi || "").trim(),
+                String(payload.mh_finishing || "").trim(),
+                String(payload.mh_sublim || "").trim(),
+                String(payload.mh_ket || "").trim(),
+                String(
+                    payload.mh_warna ||
+                        payload.garmen_warna ||
+                        (divisiNum === 4 ? "MUDA" : ""),
+                )
+                    .trim()
+                    .toUpperCase(),
+                workshopGarmen,
+                initialStatus,
+                actor,
+                hargaKalkulasi,
+                String(payload.mh_ket_kalkulasi || "").trim(),
+                nomorKalkulasi,
+                dateKalkulasi,
+            ],
+        );
+    } catch (e) {
+        if (String(e?.code || "") === "ER_BAD_FIELD_ERROR" && String(e?.sqlMessage || "").includes("mh_workshop")) {
+            console.warn("[PermintaanHarga][InsertWorkshopFallback][Warn] kolom mh_workshop belum ada, fallback tanpa kolom");
+            await conn.query(
+                `
         INSERT INTO tmintaharga (
             mh_divisi, mh_nomor, mh_tanggal, mh_cus_kode, mh_cus_nama, mh_sal_kode,
             mh_nama, mh_jmlorder, mh_harga, mh_budget, mh_dateorder, mh_kain,
@@ -1153,41 +1238,43 @@ const createPermintaanHargaInTransaction = async ({
             mh_harga_kalkulasi, mh_ket_kalkulasi, mh_nomor_kalkulasi, mh_date_kalkulasi
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
         `,
-        [
-            divisiNum,
-            nomor,
-            payload.tanggal,
-            String(payload.mh_cus_kode || "").trim(),
-            String(payload.mh_cus_nama || "").trim(),
-            salesKode,
-            String(payload.mh_nama || "").trim(),
-            toNumber(payload.mh_jmlorder, 0),
-            toNumber(payload.mh_harga, 0),
-            toNumber(payload.mh_budget, 0),
-            payload.mh_dateorder ? normalizeDate(payload.mh_dateorder) : null,
-            finalKain,
-            toDecimalNumber(payload.mh_panjang, 0),
-            finalLebar,
-            finalUkuran,
-            String(payload.mh_gramasi || "").trim(),
-            String(payload.mh_finishing || "").trim(),
-            String(payload.mh_sublim || "").trim(),
-            String(payload.mh_ket || "").trim(),
-            String(
-                payload.mh_warna ||
-                    payload.garmen_warna ||
-                    (divisiNum === 4 ? "MUDA" : ""),
-            )
-                .trim()
-                .toUpperCase(),
-            initialStatus,
-            actor,
-            hargaKalkulasi,
-            String(payload.mh_ket_kalkulasi || "").trim(),
-            nomorKalkulasi,
-            dateKalkulasi,
-        ],
-    );
+                [
+                    divisiNum,
+                    nomor,
+                    payload.tanggal,
+                    String(payload.mh_cus_kode || "").trim(),
+                    String(payload.mh_cus_nama || "").trim(),
+                    salesKode,
+                    String(payload.mh_nama || "").trim(),
+                    toNumber(payload.mh_jmlorder, 0),
+                    toNumber(payload.mh_harga, 0),
+                    toNumber(payload.mh_budget, 0),
+                    payload.mh_dateorder ? normalizeDate(payload.mh_dateorder) : null,
+                    finalKain,
+                    toDecimalNumber(payload.mh_panjang, 0),
+                    finalLebar,
+                    finalUkuran,
+                    String(payload.mh_gramasi || "").trim(),
+                    String(payload.mh_finishing || "").trim(),
+                    String(payload.mh_sublim || "").trim(),
+                    String(payload.mh_ket || "").trim(),
+                    String(
+                        payload.mh_warna ||
+                            payload.garmen_warna ||
+                            (divisiNum === 4 ? "MUDA" : ""),
+                    )
+                        .trim()
+                        .toUpperCase(),
+                    initialStatus,
+                    actor,
+                    hargaKalkulasi,
+                    String(payload.mh_ket_kalkulasi || "").trim(),
+                    nomorKalkulasi,
+                    dateKalkulasi,
+                ],
+            );
+        } else throw e;
+    }
 };
 
 const cloneImageFile = async (fromNomor, toNomor, suffix = "") => {
@@ -1273,6 +1360,12 @@ const getPermintaanHargaDetail = async ({
     const whereUserCreate = managerRole
         ? ""
         : "AND COALESCE(h.mh_sal_kode,'') = ?";
+    let hasWorkshopCol = true;
+    try {
+        const [colChk] = await db.query(`SHOW COLUMNS FROM tmintaharga LIKE 'mh_workshop'`);
+        hasWorkshopCol = Array.isArray(colChk) && colChk.length > 0;
+    } catch {}
+    const workshopSelect = hasWorkshopCol ? `COALESCE(h.mh_workshop,'') AS mh_workshop,` : `'' AS mh_workshop,`;
     const [rows] = await db.query(
         `
         SELECT
@@ -1295,6 +1388,7 @@ const getPermintaanHargaDetail = async ({
             h.mh_finishing,
             COALESCE(h.mh_sublim, '') AS mh_sublim,
             COALESCE(h.mh_warna, '') AS mh_warna,
+            ${workshopSelect}
             h.mh_ket,
             h.mh_status,
             COALESCE(h.mh_harga_kalkulasi, 0) AS mh_harga_kalkulasi,
@@ -1564,8 +1658,88 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
         }
     }
 
-    await db.query(
-        `
+    // workshop garmen untuk update (hanya divisi 4) - default MEDIUM (P01)
+    let updWorkshop = null;
+    let hasWorkshopColUpd = true;
+    try {
+        const [c] = await db.query(`SHOW COLUMNS FROM tmintaharga LIKE 'mh_workshop'`);
+        hasWorkshopColUpd = Array.isArray(c) && c.length > 0;
+    } catch { hasWorkshopColUpd = false; }
+    if (updateDivisiNum === 4 && hasWorkshopColUpd) {
+        const rawUpd = String(
+            body.mh_workshop ?? body.garmen_workshop ?? body.workshop ?? body.garmen_tier ?? body.tier ?? "",
+        ).trim().toUpperCase();
+        if (rawUpd === "P04" || rawUpd === "PREMIUM") updWorkshop = "P04";
+        else if (rawUpd === "P01" || rawUpd === "MEDIUM") updWorkshop = "P01";
+        else updWorkshop = "P01";
+    }
+    if (hasWorkshopColUpd && updWorkshop !== null) {
+        await db.query(
+            `
+        UPDATE tmintaharga
+        SET
+            mh_tanggal = ?,
+            mh_divisi = ?,
+            mh_cus_kode = ?,
+            mh_cus_nama = ?,
+            mh_sal_kode = ?,
+            mh_nama = ?,
+            mh_jmlorder = ?,
+            mh_harga = ?,
+            mh_budget = ?,
+            mh_dateorder = ?,
+            mh_kain = ?,
+            mh_panjang = ?,
+            mh_lebar = ?,
+            mh_ukuran = ?,
+            mh_gramasi = ?,
+            mh_finishing = ?,
+            mh_sublim = ?,
+            mh_ket = ?,
+            mh_warna = ?,
+            mh_workshop = ?,
+            mh_harga_kalkulasi = ?,
+            mh_ket_kalkulasi = ?,
+            user_modified = ?,
+            date_modified = NOW()
+        WHERE mh_nomor = ?
+        `,
+            [
+                normalizeDate(body.mh_tanggal || new Date().toISOString()),
+                updateDivisiNum,
+                String(body.mh_cus_kode || "").trim(),
+                String(body.mh_cus_nama || "").trim(),
+                updateSalesKode || String(rows[0].mh_sal_kode || "").trim(),
+                String(body.mh_nama || "").trim(),
+                toNumber(body.mh_jmlorder, 0),
+                toNumber(body.mh_harga, 0),
+                toNumber(body.mh_budget, 0),
+                normalizeDate(body.mh_dateorder),
+                updateKain,
+                toDecimalNumber(body.mh_panjang, 0),
+                updateFinalLebar,
+                String(body.mh_ukuran || "").trim(),
+                String(body.mh_gramasi || "").trim(),
+                String(body.mh_finishing || "").trim(),
+                String(body.mh_sublim || "").trim(),
+                String(body.mh_ket || "").trim(),
+                String(
+                    body.mh_warna ||
+                        body.garmen_warna ||
+                        (updateDivisiNum === 4 ? "MUDA" : ""),
+                )
+                    .trim()
+                    .toUpperCase(),
+                updWorkshop,
+                toNumber(body.mh_harga_kalkulasi, 0),
+                String(body.mh_ket_kalkulasi || "").trim(),
+                actor,
+                nomor,
+            ],
+        );
+    } else {
+        await db.query(
+            `
         UPDATE tmintaharga
         SET
             mh_tanggal = ?,
@@ -1593,38 +1767,39 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             date_modified = NOW()
         WHERE mh_nomor = ?
         `,
-        [
-            normalizeDate(body.mh_tanggal || new Date().toISOString()),
-            updateDivisiNum,
-            String(body.mh_cus_kode || "").trim(),
-            String(body.mh_cus_nama || "").trim(),
-            updateSalesKode || String(rows[0].mh_sal_kode || "").trim(),
-            String(body.mh_nama || "").trim(),
-            toNumber(body.mh_jmlorder, 0),
-            toNumber(body.mh_harga, 0),
-            toNumber(body.mh_budget, 0),
-            normalizeDate(body.mh_dateorder),
-            updateKain,
-            toDecimalNumber(body.mh_panjang, 0),
-            updateFinalLebar,
-            String(body.mh_ukuran || "").trim(),
-            String(body.mh_gramasi || "").trim(),
-            String(body.mh_finishing || "").trim(),
-            String(body.mh_sublim || "").trim(),
-            String(body.mh_ket || "").trim(),
-            String(
-                body.mh_warna ||
-                    body.garmen_warna ||
-                    (updateDivisiNum === 4 ? "MUDA" : ""),
-            )
-                .trim()
-                .toUpperCase(),
-            toNumber(body.mh_harga_kalkulasi, 0),
-            String(body.mh_ket_kalkulasi || "").trim(),
-            actor,
-            nomor,
-        ],
-    );
+            [
+                normalizeDate(body.mh_tanggal || new Date().toISOString()),
+                updateDivisiNum,
+                String(body.mh_cus_kode || "").trim(),
+                String(body.mh_cus_nama || "").trim(),
+                updateSalesKode || String(rows[0].mh_sal_kode || "").trim(),
+                String(body.mh_nama || "").trim(),
+                toNumber(body.mh_jmlorder, 0),
+                toNumber(body.mh_harga, 0),
+                toNumber(body.mh_budget, 0),
+                normalizeDate(body.mh_dateorder),
+                updateKain,
+                toDecimalNumber(body.mh_panjang, 0),
+                updateFinalLebar,
+                String(body.mh_ukuran || "").trim(),
+                String(body.mh_gramasi || "").trim(),
+                String(body.mh_finishing || "").trim(),
+                String(body.mh_sublim || "").trim(),
+                String(body.mh_ket || "").trim(),
+                String(
+                    body.mh_warna ||
+                        body.garmen_warna ||
+                        (updateDivisiNum === 4 ? "MUDA" : ""),
+                )
+                    .trim()
+                    .toUpperCase(),
+                toNumber(body.mh_harga_kalkulasi, 0),
+                String(body.mh_ket_kalkulasi || "").trim(),
+                actor,
+                nomor,
+            ],
+        );
+    }
 
     return {
         status: 200,
@@ -2427,9 +2602,27 @@ const getKalkulasiOptions = async () => {
             mht_ket AS ket,
             mht_lacost AS harga_lacost,
             mht_cotton AS harga_cotton,
-            mht_pe AS harga_pe
+            mht_pe AS harga_pe,
+            COALESCE(mht_pe_partaibesar, 0) AS harga_pe_partaibesar
          FROM tmintaharga_tambahan
          ORDER BY mht_ket`,
+    );
+
+    const [ongkirList] = await db.query(
+        `SELECT 
+            mho_id AS id,
+            mho_alokasi AS alokasi,
+            mho_harga_kg AS harga_kg,
+            mho_min_kg AS min_kg,
+            mho_free_spanduk_m AS free_spanduk_m,
+            mho_free_mmt_m2 AS free_mmt_m2,
+            mho_free_garmen_pcs AS free_garmen_pcs,
+            mho_spanduk_m_per_kg AS spanduk_m_per_kg,
+            mho_mmt_m2_per_kg AS mmt_m2_per_kg,
+            mho_garmen_med_pcs_per_kg AS garmen_med_pcs_per_kg,
+            mho_garmen_prem_pcs_per_kg AS garmen_prem_pcs_per_kg
+         FROM tmintaharga_ongkir
+         ORDER BY mho_id`,
     );
 
     return {
@@ -2438,6 +2631,160 @@ const getKalkulasiOptions = async () => {
         topping: toppingBanner,
         garmenKain,
         garmenTambahan,
+        ongkir: ongkirList,
+    };
+};
+
+const getOngkirOptions = async () => {
+    const [rows] = await db.query(
+        `SELECT 
+            mho_id AS id,
+            mho_alokasi AS alokasi,
+            mho_harga_kg AS harga_kg,
+            mho_min_kg AS min_kg,
+            mho_free_spanduk_m AS free_spanduk_m,
+            mho_free_mmt_m2 AS free_mmt_m2,
+            mho_free_garmen_pcs AS free_garmen_pcs,
+            mho_spanduk_m_per_kg AS spanduk_m_per_kg,
+            mho_mmt_m2_per_kg AS mmt_m2_per_kg,
+            mho_garmen_med_pcs_per_kg AS garmen_med_pcs_per_kg,
+            mho_garmen_prem_pcs_per_kg AS garmen_prem_pcs_per_kg
+         FROM tmintaharga_ongkir
+         ORDER BY mho_id`,
+    );
+    return rows;
+};
+
+const calculateOngkir = async ({
+    alokasi = "Jakarta",
+    divisi = "1",
+    panjang = 0,
+    lebar = 0,
+    qty = 0,
+    sublim = "",
+    customNominal = null,
+}) => {
+    const numPanjang = toNumber(panjang, 0);
+    const numLebar = toNumber(lebar, 0);
+    const numQty = toNumber(qty, 0);
+    const normDivisi = String(divisi || "1").trim();
+    const isCustom =
+        String(alokasi || "").toLowerCase() === "custom" ||
+        (customNominal !== null && customNominal !== undefined && customNominal !== "");
+
+    if (isCustom && customNominal !== null && customNominal !== undefined && customNominal !== "") {
+        const totalOngkir = toNumber(customNominal, 0);
+        const ongkirPerPcs = numQty > 0 ? Math.round(totalOngkir / numQty) : totalOngkir;
+        return {
+            alokasi: "Custom",
+            isCustom: true,
+            totalBeratKg: 0,
+            beratDihitungKg: 0,
+            minKg: 0,
+            tarifPerKg: 0,
+            isFreeCharge: false,
+            totalOngkir,
+            ongkirPerPcs,
+            keterangan: "Custom Ongkir",
+        };
+    }
+
+    const [rows] = await db.query(
+        `SELECT * FROM tmintaharga_ongkir WHERE mho_alokasi = ? OR mho_id = ? LIMIT 1`,
+        [alokasi, alokasi],
+    );
+
+    if (!rows || rows.length === 0) {
+        const totalCustom = toNumber(customNominal, 0);
+        return {
+            alokasi: alokasi || "Custom",
+            isCustom: true,
+            totalBeratKg: 0,
+            beratDihitungKg: 0,
+            minKg: 0,
+            tarifPerKg: 0,
+            isFreeCharge: false,
+            totalOngkir: totalCustom,
+            ongkirPerPcs: numQty > 0 ? Math.round(totalCustom / numQty) : 0,
+            keterangan: "Alokasi tidak ditemukan",
+        };
+    }
+
+    const cfg = rows[0];
+    let totalVolume = 0;
+    let totalBeratKg = 0;
+    let isFreeCharge = false;
+
+    if (normDivisi === "1") {
+        // SPANDUK: 10 meter = 1 kg (mho_spanduk_m_per_kg)
+        const totalMeter = Math.round(numPanjang * numQty * 100) / 100;
+        totalVolume = totalMeter;
+        const rasio = toNumber(cfg.mho_spanduk_m_per_kg, 10);
+        totalBeratKg = rasio > 0 ? totalMeter / rasio : 0;
+        if (cfg.mho_free_spanduk_m > 0 && totalMeter >= cfg.mho_free_spanduk_m) {
+            isFreeCharge = true;
+        }
+    } else if (normDivisi === "5") {
+        // MMT: 2 m2 = 1 kg / 0.5 kg per m2 (mho_mmt_m2_per_kg)
+        const luasPerPcs = Math.round(numPanjang * numLebar * 100) / 100;
+        const totalLuas = Math.round(luasPerPcs * numQty * 100) / 100;
+        totalVolume = totalLuas;
+        const rasio = toNumber(cfg.mho_mmt_m2_per_kg, 2);
+        totalBeratKg = rasio > 0 ? totalLuas / rasio : 0;
+        if (cfg.mho_free_mmt_m2 > 0 && totalLuas >= cfg.mho_free_mmt_m2) {
+            isFreeCharge = true;
+        }
+    } else if (normDivisi === "4") {
+        // GARMEN: 5 pcs/kg (Medium) atau 3 pcs/kg (Premium)
+        totalVolume = numQty;
+        const isPremium = String(sublim || "").toUpperCase() === "PREMIUM";
+        const rasio = isPremium
+            ? toNumber(cfg.mho_garmen_prem_pcs_per_kg, 3)
+            : toNumber(cfg.mho_garmen_med_pcs_per_kg, 5);
+        totalBeratKg = rasio > 0 ? numQty / rasio : 0;
+        if (cfg.mho_free_garmen_pcs > 0 && numQty >= cfg.mho_free_garmen_pcs) {
+            isFreeCharge = true;
+        }
+    } else {
+        totalBeratKg = numQty;
+    }
+
+    totalBeratKg = Math.round(totalBeratKg * 100) / 100;
+
+    let totalOngkir = 0;
+    let beratDihitungKg = 0;
+    const minKg = toNumber(cfg.mho_min_kg, 20);
+    const tarifPerKg = toNumber(cfg.mho_harga_kg, 0);
+
+    if (isFreeCharge) {
+        totalOngkir = 0;
+        beratDihitungKg = totalBeratKg;
+    } else {
+        beratDihitungKg = Math.max(totalBeratKg, minKg);
+        totalOngkir = Math.round(beratDihitungKg * tarifPerKg);
+    }
+
+    const ongkirPerPcs = numQty > 0 ? Math.round(totalOngkir / numQty) : totalOngkir;
+
+    return {
+        id: cfg.mho_id,
+        alokasi: cfg.mho_alokasi,
+        tarifPerKg,
+        minKg,
+        totalBeratKg,
+        beratDihitungKg,
+        isFreeCharge,
+        totalOngkir,
+        ongkirPerPcs,
+        rawConfig: {
+            freeSpandukM: cfg.mho_free_spanduk_m,
+            freeMmtM2: cfg.mho_free_mmt_m2,
+            freeGarmenPcs: cfg.mho_free_garmen_pcs,
+            spandukMPerKg: cfg.mho_spanduk_m_per_kg,
+            mmtM2PerKg: cfg.mho_mmt_m2_per_kg,
+            garmenMedPcsPerKg: cfg.mho_garmen_med_pcs_per_kg,
+            garmenPremPcsPerKg: cfg.mho_garmen_prem_pcs_per_kg,
+        },
     };
 };
 
@@ -2506,6 +2853,8 @@ const calculateMmt = async ({
     toppingKode = "",
     toppingQty = 0,
     isNetto = false,
+    selongsongVertical = false,
+    selongsongHorizontal = false,
 }) => {
     const numPanjang = toNumber(panjang, 0);
     const numLebar = toNumber(lebar, 0);
@@ -2582,7 +2931,20 @@ const calculateMmt = async ({
         }
     }
 
-    const totalHarga = biayaCetak + totalTopping;
+    // Biaya Finishing Selongsong (Opsional)
+    const isSelongsongVert = Boolean(selongsongVertical);
+    const isSelongsongHoriz = Boolean(selongsongHorizontal);
+    const biayaSelongsongVertPerPcs = isSelongsongVert
+        ? Math.round(0.2 * numPanjang * tarifPerM2)
+        : 0;
+    const biayaSelongsongHorizPerPcs = isSelongsongHoriz
+        ? Math.round(0.2 * numLebar * tarifPerM2)
+        : 0;
+    const totalSelongsongPerPcs =
+        biayaSelongsongVertPerPcs + biayaSelongsongHorizPerPcs;
+    const totalSelongsong = totalSelongsongPerPcs * numQty;
+
+    const totalHarga = biayaCetak + totalTopping + totalSelongsong;
     const hargaSatuanPcs = numQty > 0 ? Math.round(totalHarga / numQty) : 0;
 
     return {
@@ -2591,6 +2953,14 @@ const calculateMmt = async ({
         tarifPerM2,
         biayaCetak,
         topping: toppingData,
+        selongsong: {
+            isVertical: isSelongsongVert,
+            isHorizontal: isSelongsongHoriz,
+            biayaVerticalPerPcs: biayaSelongsongVertPerPcs,
+            biayaHorizontalPerPcs: biayaSelongsongHorizPerPcs,
+            totalPerPcs: totalSelongsongPerPcs,
+            totalBiaya: totalSelongsong,
+        },
         totalHarga,
         hargaSatuanPcs,
         strataAktif: matched || null,
@@ -2724,19 +3094,14 @@ const calculateGarmen = async ({
                     jkUpper.includes("HYGIT") ||
                     jkUpper.includes("DRYFIT");
 
-                if (
-                    isLacost &&
-                    matchedTam.mht_lacost !== undefined &&
-                    matchedTam.mht_lacost !== null
-                )
+                if (isLacost) {
                     tarifTambahan = toNumber(matchedTam.mht_lacost, 0);
-                else if (
-                    isPe &&
-                    matchedTam.mht_pe !== undefined &&
-                    matchedTam.mht_pe !== null
-                )
-                    tarifTambahan = toNumber(matchedTam.mht_pe, 0);
-                else tarifTambahan = toNumber(matchedTam.mht_cotton, 0);
+                } else if (isPe) {
+                    const peBesar = toNumber(matchedTam.mht_pe_partaibesar, 0);
+                    const peNormal = toNumber(matchedTam.mht_pe, 0);
+                    if (numQty >= 1000 && peBesar > 0) tarifTambahan = peBesar;
+                    else tarifTambahan = peNormal;
+                } else tarifTambahan = toNumber(matchedTam.mht_cotton, 0);
 
                 resolvedTambahan.push({
                     ket: matchedTam.mht_ket,
@@ -2766,14 +3131,79 @@ const calculateGarmen = async ({
             FROM tmintaharga_biaya 
             WHERE mhb_jenis IN ('SABLON', 'SUBLIM', 'DTF', 'BORDIR')`,
         );
+        // Kategori cetak sablon berdasarkan ktg kain (mirip tambahan)
+        const ktgUpperCetak = (ktg || "").toUpperCase().trim();
+        const jkUpperCetak = (normJenisKain || "").toUpperCase().trim();
+        let kategoriCetak = "COTTON";
+        if (
+            ktgUpperCetak.includes("LACOST") ||
+            jkUpperCetak.includes("LACOST") ||
+            jkUpperCetak.includes("PIQUE")
+        ) kategoriCetak = "LACOST";
+        else if (
+            ktgUpperCetak.includes("PE") ||
+            ktgUpperCetak.includes("HYGIT") ||
+            ktgUpperCetak.includes("DRYFIT") ||
+            jkUpperCetak.includes("PE ") ||
+            jkUpperCetak.includes("HYGIT") ||
+            jkUpperCetak.includes("DRYFIT")
+        ) kategoriCetak = "PE";
+
         cetakList.forEach((cItem) => {
             const jenisName = (cItem?.jenis || "").trim().toUpperCase();
             const ketName = (cItem?.ket || "").trim().toUpperCase();
-            const matchedCetak = allCetak.find(
-                (ac) =>
-                    ac.mhb_jenis.trim().toUpperCase() === jenisName &&
-                    ac.mhb_ket.trim().toUpperCase() === ketName,
-            );
+            const isSablon = jenisName === "SABLON";
+
+            let matchedCetak = null;
+            if (isSablon) {
+                // 1. Coba exact match langsung di master
+                matchedCetak = allCetak.find((ac) => {
+                    const acJenis = String(ac.mhb_jenis || "").trim().toUpperCase();
+                    const acKet = String(ac.mhb_ket || "").trim().toUpperCase();
+                    return acJenis === "SABLON" && acKet === ketName;
+                });
+
+                // 2. Jika belum cocok dan ketName belum ada suffix kain, coba cari dengan suffix kategori kain
+                if (!matchedCetak) {
+                    const targetWithKtg = `${ketName} ${kategoriCetak}`;
+                    matchedCetak = allCetak.find((ac) => {
+                        const acJenis = String(ac.mhb_jenis || "").trim().toUpperCase();
+                        const acKet = String(ac.mhb_ket || "").trim().toUpperCase();
+                        return acJenis === "SABLON" && acKet === targetWithKtg;
+                    });
+                }
+
+                // 3. Khusus MEDIUM: jika PE cari varian "... PE", jika Cotton/Lacost cari varian umum (tanpa PE)
+                if (!matchedCetak && ketName.startsWith("MEDIUM")) {
+                    matchedCetak = allCetak.find((ac) => {
+                        const acJenis = String(ac.mhb_jenis || "").trim().toUpperCase();
+                        const acKet = String(ac.mhb_ket || "").trim().toUpperCase();
+                        if (acJenis !== "SABLON") return false;
+                        if (kategoriCetak === "PE") {
+                            return acKet === `${ketName} PE` || (acKet.startsWith(ketName) && acKet.endsWith(" PE"));
+                        } else {
+                            return acKet === ketName && !acKet.endsWith(" PE");
+                        }
+                    });
+                }
+
+                // 4. Fallback: cari sablon yang dimulai dengan ketName dasar dan berakhiran kategori kain
+                if (!matchedCetak) {
+                    matchedCetak = allCetak.find((ac) => {
+                        const acJenis = String(ac.mhb_jenis || "").trim().toUpperCase();
+                        const acKet = String(ac.mhb_ket || "").trim().toUpperCase();
+                        if (acJenis !== "SABLON") return false;
+                        return acKet.startsWith(ketName) && acKet.endsWith(` ${kategoriCetak}`);
+                    });
+                }
+            } else {
+                matchedCetak = allCetak.find((ac) => {
+                    const acJenis = String(ac.mhb_jenis || "").trim().toUpperCase();
+                    const acKet = String(ac.mhb_ket || "").trim().toUpperCase();
+                    return acJenis === jenisName && acKet === ketName;
+                });
+            }
+
             if (matchedCetak) {
                 const itemBiaya =
                     Number(cItem?.biaya) > 0
@@ -2781,14 +3211,20 @@ const calculateGarmen = async ({
                         : Number(matchedCetak.mhb_biaya) || 0;
                 resolvedCetak.push({
                     jenis: matchedCetak.mhb_jenis,
-                    ket: matchedCetak.mhb_ket,
+                    ket: matchedCetak.mhb_ket || ketName,
                     biaya: itemBiaya,
                 });
-            } else if (cItem) {
+            } else if (Number(cItem?.biaya) > 0) {
                 resolvedCetak.push({
-                    jenis: cItem.jenis || "CETAK",
+                    jenis: cItem.jenis || (isSablon ? "SABLON" : "CETAK"),
                     ket: cItem.ket || "",
-                    biaya: Number(cItem.biaya) || 0,
+                    biaya: Number(cItem.biaya),
+                });
+            } else {
+                resolvedCetak.push({
+                    jenis: cItem?.jenis || (isSablon ? "SABLON" : "CETAK"),
+                    ket: cItem?.ket || "",
+                    biaya: 0,
                 });
             }
         });
@@ -2825,21 +3261,45 @@ const calculateGarmen = async ({
     let dbBiayaJahit = null;
     if (customBiayaJahit === undefined || customBiayaJahit === null) {
         try {
+            const isPartaiBesarJahit = numQty >= 1000;
+            const colPartaiBesar =
+                normKodeModel === "KH-0002"
+                    ? "mhb_biaya_partaibesar_kh0002"
+                    : "mhb_biaya_partaibesar_kh0001";
             const [jahitRows] = await db.query(
-                "SELECT mhb_ket, mhb_biaya FROM tmintaharga_biaya WHERE mhb_jenis = 'JAHIT'",
+                `SELECT mhb_ket, mhb_biaya, 
+                        COALESCE(${colPartaiBesar}, 0) AS mhb_biaya_partaibesar 
+                 FROM tmintaharga_biaya 
+                 WHERE mhb_jenis = 'JAHIT'`,
             );
             if (jahitRows && jahitRows.length > 0) {
-                const rowJahit = jahitRows.find((j) => {
-                    const ket = (j.mhb_ket || "").trim().toUpperCase();
-                    return isSport
-                        ? ket === "PE" ||
-                              ket === "HYGIT" ||
-                              ket === "DRYFIT" ||
-                              ket === "SPORT"
-                        : ket === "-" || ket === "";
-                });
+                const ktgUpper = (ktg || "").toUpperCase().trim();
+                const rowJahit =
+                    jahitRows.find((j) => {
+                        const ket = (j.mhb_ket || "").trim().toUpperCase();
+                        if (isSport) {
+                            return (
+                                ket === ktgUpper ||
+                                ket === "PE" ||
+                                ket === "HYGIT" ||
+                                ket === "DRYFIT" ||
+                                ket === "SPORT"
+                            );
+                        }
+                        if (ktgUpper.includes("LACOST")) return ket === "LACOST";
+                        if (ktgUpper.includes("COTTON")) return ket === "COTTON" || ket === "-";
+                        return ket === "-" || ket === "";
+                    }) ||
+                    jahitRows.find((j) => (j.mhb_ket || "").trim() === "-") ||
+                    jahitRows[0];
+
                 if (rowJahit) {
-                    dbBiayaJahit = Number(rowJahit.mhb_biaya) || 0;
+                    const biayaNormal = Number(rowJahit.mhb_biaya) || 0;
+                    const biayaBesar = Number(rowJahit.mhb_biaya_partaibesar) || 0;
+                    dbBiayaJahit =
+                        isPartaiBesarJahit && biayaBesar > 0
+                            ? biayaBesar
+                            : biayaNormal;
                 }
             }
         } catch (jErr) {
@@ -2928,6 +3388,7 @@ const getTambahanOptions = async ({
     jenisKain = "",
     kategori = "",
     kodeModel = "KH-0001",
+    qty = 0,
 } = {}) => {
     let resolvedKtg = (kategori || "").toUpperCase().trim();
     const normJenisKain = (jenisKain || "").trim();
@@ -2957,6 +3418,7 @@ const getTambahanOptions = async ({
         jkUpper.includes("HYGIT") ||
         jkUpper.includes("DRYFIT");
 
+    const numQty = toNumber(qty, 0);
     const [rows] = await db.query(
         `SELECT 
             mht_ket,
@@ -2965,7 +3427,8 @@ const getTambahanOptions = async ({
             mht_ket AS nama,
             mht_lacost,
             mht_cotton,
-            mht_pe 
+            mht_pe,
+            COALESCE(mht_pe_partaibesar, 0) AS mht_pe_partaibesar
          FROM tmintaharga_tambahan 
          ORDER BY mht_ket`,
     );
@@ -2974,12 +3437,19 @@ const getTambahanOptions = async ({
         let tarif = toNumber(r.mht_cotton, 0);
         let selectedCategory = "COTTON";
 
-        if (isLacost && r.mht_lacost !== undefined && r.mht_lacost !== null) {
+        if (isLacost) {
             tarif = toNumber(r.mht_lacost, 0);
             selectedCategory = "LACOSTE";
-        } else if (isPe && r.mht_pe !== undefined && r.mht_pe !== null) {
-            tarif = toNumber(r.mht_pe, 0);
-            selectedCategory = "PE";
+        } else if (isPe) {
+            const peBesar = toNumber(r.mht_pe_partaibesar, 0);
+            const peNormal = toNumber(r.mht_pe, 0);
+            if (numQty >= 1000 && peBesar > 0) {
+                tarif = peBesar;
+                selectedCategory = "PE_PARTAIBESAR";
+            } else {
+                tarif = peNormal;
+                selectedCategory = "PE";
+            }
         }
 
         return {
@@ -3145,6 +3615,8 @@ module.exports = {
     deletePermintaanHargaImage,
     getPermintaanHargaStatusCounts,
     getKalkulasiOptions,
+    getOngkirOptions,
+    calculateOngkir,
     calculateSpanduk,
     calculateMmt,
     calculateGarmen,
@@ -3153,3 +3625,4 @@ module.exports = {
     getCetakOptions,
     getCustomerSoHistory,
 };
+

@@ -329,6 +329,32 @@ const getKalkulasiOptions = async (req, res) => {
     }
 };
 
+const getOngkirOptions = async (req, res) => {
+    try {
+        const data = await permintaanHargaService.getOngkirOptions();
+        return res.json({
+            success: true,
+            data,
+        });
+    } catch (err) {
+        console.error("[PermintaanHarga][Kalkulasi][OngkirOptions][Error]", err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+const calculateOngkir = async (req, res) => {
+    try {
+        const data = await permintaanHargaService.calculateOngkir(req.body || {});
+        return res.json({
+            success: true,
+            data,
+        });
+    } catch (err) {
+        console.error("[PermintaanHarga][Kalkulasi][Ongkir][Error]", err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
 const calculateSpanduk = async (req, res) => {
     try {
         const data = await permintaanHargaService.calculateSpanduk(req.body || {});
@@ -381,11 +407,12 @@ const getJenisKainMintaHarga = async (req, res) => {
 
 const getTambahanOptions = async (req, res) => {
     try {
-        const { jenisKain, kategori, kodeModel } = req.query;
+        const { jenisKain, kategori, kodeModel, qty } = req.query;
         const data = await permintaanHargaService.getTambahanOptions({
             jenisKain,
             kategori,
             kodeModel,
+            qty,
         });
         return res.json({ success: true, data });
     } catch (err) {
@@ -428,6 +455,8 @@ const getCustomerSoHistory = async (req, res) => {
 
 module.exports = {
     getKalkulasiOptions,
+    getOngkirOptions,
+    calculateOngkir,
     calculateSpanduk,
     calculateMmt,
     calculateGarmen,

@@ -76,7 +76,7 @@ const getTrackingPenawaranList = async ({
         LEFT JOIN tsales s
             ON s.sal_kode = h.pen_sal_kode
         LEFT JOIN tcustomer c
-            ON c.cus_kode = h.pen_cus_kode
+            ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
         LEFT JOIN tmemospk m
             ON m.mspk_pen_nomor = h.pen_nomor
            AND m.mspk_pen_id = d.pend_id
@@ -128,7 +128,7 @@ const getTrackingPenawaranList = async ({
             COALESCE(c.cus_nama, '') AS customer
         FROM tpenawaran_hdr h
         LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
-        LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
+        LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
         WHERE ${ownerFilterSql}h.pen_tanggal >= ? AND h.pen_tanggal <= ?
         `,
         baseParams,

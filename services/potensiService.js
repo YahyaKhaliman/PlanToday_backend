@@ -131,7 +131,7 @@ const getKandidatList = async ({
         LEFT JOIN tsales s 
             ON s.sal_kode = h.pen_sal_kode
         LEFT JOIN tcustomer c 
-            ON c.cus_kode = h.pen_cus_kode
+            ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
         LEFT JOIN tmemospk m 
             ON m.mspk_pen_nomor = h.pen_nomor 
            AND m.mspk_pen_id = d.pend_id
@@ -175,7 +175,7 @@ const getKandidatList = async ({
         LEFT JOIN tsales s 
             ON s.sal_kode = COALESCE(m.mspk_sal_kode, h.pen_sal_kode, '')
         LEFT JOIN tcustomer c 
-            ON c.cus_kode = COALESCE(m.mspk_cus_kode, h.pen_cus_kode, '')
+            ON c.cus_kode = COALESCE(m.mspk_cus_kode, h.pen_cus_kode, '') AND c.cus_aktif = 1
         LEFT JOIN tsalesorder so 
             ON so.so_memo = m.mspk_nomor 
            AND so.so_aktif = 'Y'
@@ -456,7 +456,7 @@ const getList = async ({
             ON d.pend_pen_nomor = h.pen_nomor 
            AND (d.pend_id = m.mspk_pen_id OR d.pend_nama_barang = p.pot_nama_item)
         LEFT JOIN tcustomer c 
-            ON c.cus_kode = COALESCE(p.pot_cus_kode, m.mspk_cus_kode, h.pen_cus_kode)
+            ON c.cus_kode = COALESCE(p.pot_cus_kode, m.mspk_cus_kode, h.pen_cus_kode) AND c.cus_aktif = 1
         LEFT JOIN tsales s 
             ON s.sal_kode = COALESCE(p.pot_sal_kode, m.mspk_sal_kode, h.pen_sal_kode)
         ${whereSql}

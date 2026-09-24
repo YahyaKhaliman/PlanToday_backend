@@ -41,13 +41,23 @@ const getPenawaranList = async (req, res) => {
             300,
         );
 
+        const filterSalesKode = String(
+            req.query.sales_kode || req.query.sales || "",
+        ).trim();
+
+        const approvalStatus = String(
+            req.query.approval_status || req.query.approval || req.query.approved || "",
+        ).trim().toUpperCase();
+
         const rows = await penawaranService.getPenawaranList({
             managerRole,
             authSalesKode,
+            filterSalesKode,
             startDate,
             endDate,
             search,
             statusInfo,
+            approvalStatus,
             limit,
         });
 
@@ -477,6 +487,43 @@ const getPenawaranActivityLogs = async (req, res) => {
     }
 };
 
+const approvePenawaran = async (req, res) => {
+    try {
+        const schemaReady = await handleSchemaCheck(res);
+        if (!schemaReady) return;
+
+        const managerRole = penawaranService.isManagerUser(req.user);
+        if (!managerRole) {
+            return res.status(403).json({
+                success: false,
+                message: "Hanya manager yang berhak meng-approve penawaran",
+            });
+        }
+
+        const nomor = String(req.params.nomor || "").trim();
+        if (!nomor) {
+            return res.status(400).json({
+                success: false,
+                message: "Nomor penawaran tidak valid",
+            });
+        }
+
+        const result = await penawaranService.approvePenawaran({
+            nomor,
+            user: req.user,
+        });
+
+        return res.status(result.status).json(result.body);
+    } catch (err) {
+        console.error("APPROVE PENAWARAN ERROR:", err);
+        return res.status(500).json({
+            success: false,
+            message:
+                err.sqlMessage || err.message || "Gagal meng-approve penawaran",
+        });
+    }
+};
+
 module.exports = {
     getPenawaranList,
     getPenawaranDetail,
@@ -491,4 +538,5 @@ module.exports = {
     getMasterPenawaranConfirm,
     requestApprovalPerubahan,
     getPenawaranActivityLogs,
+    approvePenawaran,
 };

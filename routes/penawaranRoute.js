@@ -16,6 +16,11 @@ router.post(
     auth,
     penawaranController.requestApprovalPerubahan,
 );
+router.post(
+    "/penawaran/:nomor/approve",
+    auth,
+    penawaranController.approvePenawaran,
+);
 router.get(
     "/penawaran/:nomor/activity-logs",
     auth,
