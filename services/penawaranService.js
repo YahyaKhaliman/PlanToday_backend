@@ -1583,7 +1583,7 @@ const getMasterPermintaanHargaForPenawaran = async ({
             COALESCE(NULLIF(m.mh_harga_kalkulasi, 0), m.mh_harga, 0) AS harga_referensi,
             COALESCE(m.mh_nomor_kalkulasi, '') AS nomor_kalkulasi,
             COALESCE(m.mh_ket_kalkulasi, '') AS ket_kalkulasi,
-            IF(m.mh_ket_kalkulasi REGEXP '(?i)inc[[:space:]]*ppn|incppn', 1, 0) AS is_include_ppn,
+            IF(LOWER(COALESCE(m.mh_ket_kalkulasi, '')) REGEXP 'inc[[:space:]]*ppn|incppn', 1, 0) AS is_include_ppn,
             IF(UPPER(TRIM(COALESCE(m.mh_status, ''))) IN ('SELESAI', 'DONE'), 1, 0) AS is_non_belum
         FROM tmintaharga m
         LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
@@ -1626,7 +1626,7 @@ const getMasterPermintaanHargaForPenawaran = async ({
                 COALESCE(m.mh_ket, '') AS keterangan,
                 COALESCE(m.mh_nomor_kalkulasi, '') AS nomor_kalkulasi,
                 COALESCE(m.mh_ket_kalkulasi, '') AS ket_kalkulasi,
-                IF(m.mh_ket_kalkulasi REGEXP '(?i)inc[[:space:]]*ppn|incppn', 1, 0) AS is_include_ppn,
+                IF(LOWER(COALESCE(m.mh_ket_kalkulasi, '')) REGEXP 'inc[[:space:]]*ppn|incppn', 1, 0) AS is_include_ppn,
                 IF(UPPER(TRIM(COALESCE(m.mh_status, ''))) IN ('SELESAI', 'DONE'), 1, 0) AS is_non_belum
             FROM tmintaharga m
             LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
