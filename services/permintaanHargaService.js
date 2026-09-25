@@ -263,13 +263,10 @@ const createPermintaanHargaInTransaction = async ({
         }
     }
 
-    let nomorKalkulasi = null;
-    let dateKalkulasi = null;
+    let nomorKalkulasi = String(payload.mh_nomor_kalkulasi || "").trim();
+    let dateKalkulasi = payload.mh_date_kalkulasi || null;
 
-    const isDone = initialStatus === "DONE";
-
-    if (isDone && hargaKalkulasi > 0) {
-        nomorKalkulasi = String(payload.mh_nomor_kalkulasi || "").trim();
+    if (hargaKalkulasi > 0) {
         if (!nomorKalkulasi) {
             nomorKalkulasi = await generateKalkulasiNomor(
                 conn,
@@ -1063,6 +1060,10 @@ const createPermintaanHargaInTransaction = async ({
         else workshopGarmen = "P01";
     }
 
+    // Jika status bukan DONE (misalnya NEGO), kosongkan kolom nomor dan tanggal kalkulasi di tmintaharga
+    const mhNomorKalkulasi = initialStatus === "DONE" ? nomorKalkulasi : null;
+    const mhDateKalkulasi = initialStatus === "DONE" ? dateKalkulasi : null;
+
     // Coba insert dengan kolom mh_workshop, fallback jika kolom belum ada di DB (ER_BAD_FIELD_ERROR)
     try {
         await conn.query(
@@ -1107,8 +1108,8 @@ const createPermintaanHargaInTransaction = async ({
                 actor,
                 hargaKalkulasi,
                 String(payload.mh_ket_kalkulasi || "").trim(),
-                nomorKalkulasi,
-                dateKalkulasi,
+                mhNomorKalkulasi,
+                mhDateKalkulasi,
             ],
         );
     } catch (e) {
@@ -1155,8 +1156,8 @@ const createPermintaanHargaInTransaction = async ({
                     actor,
                     hargaKalkulasi,
                     String(payload.mh_ket_kalkulasi || "").trim(),
-                    nomorKalkulasi,
-                    dateKalkulasi,
+                    mhNomorKalkulasi,
+                    mhDateKalkulasi,
                 ],
             );
         } else throw e;
