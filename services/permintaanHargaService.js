@@ -263,10 +263,13 @@ const createPermintaanHargaInTransaction = async ({
         }
     }
 
-    let nomorKalkulasi = String(payload.mh_nomor_kalkulasi || "").trim();
-    let dateKalkulasi = payload.mh_date_kalkulasi || null;
+    let nomorKalkulasi = null;
+    let dateKalkulasi = null;
 
-    if (hargaKalkulasi > 0) {
+    const isDone = initialStatus === "DONE";
+
+    if (isDone && hargaKalkulasi > 0) {
+        nomorKalkulasi = String(payload.mh_nomor_kalkulasi || "").trim();
         if (!nomorKalkulasi) {
             nomorKalkulasi = await generateKalkulasiNomor(
                 conn,
