@@ -823,7 +823,7 @@ const getPenawaranList = async ({
             LIMIT 1
         ), '') AS approval_state
     FROM tpenawaran_hdr h
-    INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
+    INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
     INNER JOIN tperusahaan p ON p.perush_kode = h.pen_perush_kode
     LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
     LEFT JOIN tdivisi v ON v.kode = h.pen_divisi
@@ -905,7 +905,7 @@ const getPenawaranDetail = async ({ managerRole, authSalesKode, nomor }) => {
                 LIMIT 1
             ), '') AS approval_state
         FROM tpenawaran_hdr h
-        INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
+        INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
         INNER JOIN tperusahaan p ON p.perush_kode = h.pen_perush_kode
         LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
         LEFT JOIN tdivisi v ON v.kode = h.pen_divisi
@@ -1462,7 +1462,7 @@ const getMasterCustomer = async (search = "") => {
             COALESCE(c.cus_telp, '') AS cc_telp,
             'CUSTOMER' AS sumber
         FROM tcustomer c
-        WHERE c.cus_aktif = 1 AND (? = '' OR c.cus_kode LIKE ? OR c.cus_nama LIKE ?)
+        WHERE (? = '' OR c.cus_kode LIKE ? OR c.cus_nama LIKE ?)
         ORDER BY c.cus_nama ASC
         LIMIT 50
         `,
@@ -1510,7 +1510,7 @@ const getMasterPenawaranNomor = async (search = "") => {
             COALESCE(c.cus_nama, '') AS customer,
             COALESCE(p.perush_nama, '') AS perusahaan
         FROM tpenawaran_hdr h
-        LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode AND c.cus_aktif = 1
+        LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
         LEFT JOIN tperusahaan p ON p.perush_kode = h.pen_perush_kode
         WHERE (
             ? = ''

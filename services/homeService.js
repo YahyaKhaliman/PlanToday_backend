@@ -237,7 +237,7 @@ const cariCustomer = async (search) => {
             cus_email                                  AS cc_email,
             'CUSTOMER'                                 AS sumber
         FROM kencanaprint.tcustomer
-        WHERE cus_aktif = 1 AND (cus_nama LIKE ? OR cus_kode LIKE ?)
+        WHERE (cus_nama LIKE ? OR cus_kode LIKE ?)
         ORDER BY cus_nama ASC
         LIMIT 50
         `,
@@ -379,7 +379,7 @@ const visitPlanById = async ({ user, tanggal, cus_kode }) => {
             c.cus_alamat AS cc_alamat,
             c.cus_kota AS cc_kota
         FROM tkunjungan k
-        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode AND c.cus_aktif = 1
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         WHERE k.user = ?
             AND DATE(k.tanggal_plan) = ?
             AND k.cus_kode = ?
@@ -637,7 +637,7 @@ const getVisitFromPlan = async ({ user, cus_kode, tanggal }) => {
             c.cus_alamat AS cc_alamat,
             c.cus_kota AS cc_kota
         FROM tkunjungan k
-        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode AND c.cus_aktif = 1
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         WHERE k.user = ?
             AND k.cus_kode = ?
             AND DATE(k.tanggal_plan) = ?
@@ -775,7 +775,7 @@ const getRekapVisit = async ({ user, start, end, cabang, publicBaseUrl }) => {
             ELSE CONCAT(?, CAST(a.foto AS CHAR(255)))
         END AS foto_url
         FROM tkunjungan a
-        LEFT JOIN kencanaprint.tcustomer b ON b.cus_kode = a.cus_kode AND b.cus_aktif = 1
+        LEFT JOIN kencanaprint.tcustomer b ON b.cus_kode = a.cus_kode
         LEFT JOIN tkaryawan k ON k.kar_nama = a.user AND k.kar_isaktif = 1
         WHERE a.user = ?
         AND a.realisasi = 'Y'
@@ -811,7 +811,7 @@ const rekapVisitWA = async ({ user, start, end, cabang }) => {
         ka.kar_cabang AS user_cabang
     FROM tkunjungan ku
     INNER JOIN tkaryawan ka ON ka.kar_nama = ku.user
-    INNER JOIN kencanaprint.tcustomer ca ON ca.cus_kode = ku.cus_kode AND ca.cus_aktif = 1
+    INNER JOIN kencanaprint.tcustomer ca ON ca.cus_kode = ku.cus_kode
     WHERE ku.user = ?
         AND ku.realisasi = 'Y'
         AND DATE(ku.tanggal) >= ?
@@ -911,7 +911,7 @@ const getRekapVisitPlan = async ({
             c.cus_kota AS cc_kota
         FROM pick p
         JOIN tkunjungan k ON k.id = p.pick_id
-        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode AND c.cus_aktif = 1
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE ka.kar_jabatan = 'SALES'
         `;
@@ -950,7 +950,7 @@ const getRekapVisitPlan = async ({
             c.cus_kota AS cc_kota
         FROM pick p
         JOIN tkunjungan k ON k.id = p.pick_id
-        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode AND c.cus_aktif = 1
+        LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
         `;
@@ -1003,7 +1003,7 @@ const rekapVisitPlanWA = async ({ user, start, end, cabang }) => {
         AND DATE(t.tanggal_plan) <= ?
     GROUP BY t.user, DATE(t.tanggal_plan), t.cus_kode
     ) p ON p.pick_id = k.id
-    LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode AND c.cus_aktif = 1
+    LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
     LEFT JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
     WHERE k.user = ?
     `;
@@ -1084,7 +1084,7 @@ const getRekapCalonCustomer = async ({ cabang, cc_nama, limit }) => {
           cus_alamat_npwp AS cc_alamat_npwp,
           cus_kota_npwp AS cc_kota_npwp
       FROM kencanaprint.tcustomer
-    WHERE cus_aktif = 1
+    WHERE 1=1
     `;
     const params = [];
 
@@ -1126,7 +1126,7 @@ const rekapCalonCustomerWA = async ({ cabang, keyword }) => {
         cus_kota   AS cc_kota,
         'CUSTOMER' AS sumber
     FROM kencanaprint.tcustomer
-    WHERE cus_aktif = 1 AND cus_nama LIKE ?
+    WHERE cus_nama LIKE ?
     ${cab ? "AND cus_kota = ?" : ""}
     ORDER BY cus_nama ASC
     LIMIT ${MAX_WA_ROWS}

@@ -208,7 +208,7 @@ const getOmsetByMonth = async ({ kode, year, fromInt, toInt }) => {
                     (IFNULL(s.spk_jumlah, 0) * IFNULL(s.spk_harga, 0)) AS nilai,
                     COALESCE(s.spk_close, 0) AS spk_close
                 FROM ${process.env.DB_NAME_PENAWARAN}.tspk s
-                LEFT JOIN ${process.env.DB_NAME_PENAWARAN}.tcustomer c ON c.cus_kode = s.spk_cus_kode AND c.cus_aktif = 1
+                LEFT JOIN ${process.env.DB_NAME_PENAWARAN}.tcustomer c ON c.cus_kode = s.spk_cus_kode
                 WHERE s.spk_aktif = 'Y'
                   AND s.spk_divisi IN (1, 4, 5)
                   ${salesFilterSql}
