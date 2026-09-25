@@ -210,12 +210,6 @@ const generateKalkulasiNomor = async (conn, tanggal) => {
          WHERE kal_nomor LIKE ? AND LEFT(kal_nomor, 4) = 'KALS'`,
         [`%${tahunStr}${bulanStr}%`],
     );
-    const [kal2Rows] = await conn.query(
-        `SELECT IFNULL(MAX(CAST(RIGHT(kal_nomor, 4) AS UNSIGNED)), 0) AS max_val 
-         FROM kalkulasi.tkalkulasi2_hdr 
-         WHERE kal_nomor LIKE ? AND LEFT(kal_nomor, 4) = 'KALS'`,
-        [`%${tahunStr}${bulanStr}%`],
-    );
     const [mhRows] = await conn.query(
         `SELECT IFNULL(MAX(CAST(RIGHT(mh_nomor_kalkulasi, 4) AS UNSIGNED)), 0) AS max_val 
          FROM tmintaharga 
@@ -224,9 +218,8 @@ const generateKalkulasiNomor = async (conn, tanggal) => {
     );
 
     const maxKal = parseInt(kalRows?.[0]?.max_val || 0, 10);
-    const maxKal2 = parseInt(kal2Rows?.[0]?.max_val || 0, 10);
     const maxMh = parseInt(mhRows?.[0]?.max_val || 0, 10);
-    const nextVal = Math.max(maxKal, maxKal2, maxMh) + 1;
+    const nextVal = Math.max(maxKal, maxMh) + 1;
     return `${prefix}${String(nextVal).padStart(4, "0")}`;
 };
 
@@ -624,9 +617,8 @@ const createPermintaanHargaInTransaction = async ({
         }
 
         try {
-            // 1. Simpan Header Kalkulasi ke tkalkulasi_hdr dan tkalkulasi2_hdr
-            const hdrQueries = [
-                `
+            // 1. Simpan Header Kalkulasi ke tkalkulasi_hdr
+            const hdrSql = `
                 INSERT INTO kalkulasi.tkalkulasi_hdr (
                     kal_nomor, kal_mh_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
                     kal_order, kal_rencanaorder, kal_rpallowance, kal_allowance,
@@ -651,35 +643,9 @@ const createPermintaanHargaInTransaction = async ({
                     kal_ketbeli = VALUES(kal_ketbeli),
                     user_modified = ?,
                     date_modified = NOW()
-                `,
-                `
-                INSERT INTO kalkulasi.tkalkulasi2_hdr (
-                    kal_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
-                    kal_order, kal_rencanaorder, kal_rpallowance, kal_allowance,
-                    kal_rplaba, kal_laba, kal_persen, kal_pakaiobat, kal_ppn,
-                    kal_rpsesuai, kal_rpsesuaippn, kal_ket, kal_ketbeli,
-                    user_create, date_create
-                ) VALUES (?, ?, NOW(), ?, ?, 0, ?, ?, ?, ?, ?, 'Y', 'N', ?, ?, ?, ?, ?, ?, NOW())
-                ON DUPLICATE KEY UPDATE
-                    kal_project = VALUES(kal_project),
-                    kal_cus = VALUES(kal_cus),
-                    kal_kh_kode = VALUES(kal_kh_kode),
-                    kal_rencanaorder = VALUES(kal_rencanaorder),
-                    kal_rpallowance = VALUES(kal_rpallowance),
-                    kal_allowance = VALUES(kal_allowance),
-                    kal_rplaba = VALUES(kal_rplaba),
-                    kal_laba = VALUES(kal_laba),
-                    kal_ppn = VALUES(kal_ppn),
-                    kal_rpsesuai = VALUES(kal_rpsesuai),
-                    kal_rpsesuaippn = VALUES(kal_rpsesuaippn),
-                    kal_ket = VALUES(kal_ket),
-                    kal_ketbeli = VALUES(kal_ketbeli),
-                    user_modified = ?,
-                    date_modified = NOW()
-                `,
-            ];
+            `;
 
-            await conn.query(hdrQueries[0], [
+            await conn.query(hdrSql, [
                 nomorKalkulasi,
                 nomor,
                 String(payload.mh_nama || "").trim(),
@@ -699,32 +665,6 @@ const createPermintaanHargaInTransaction = async ({
                 actor,
             ]);
 
-            try {
-                await conn.query(hdrQueries[1], [
-                    nomorKalkulasi,
-                    String(payload.mh_nama || "").trim(),
-                    String(payload.mh_cus_nama || "").trim(),
-                    modelKhKode,
-                    toNumber(payload.mh_jmlorder, 0),
-                    kalRpAllowance,
-                    kalAllowance,
-                    kalRpLaba,
-                    kalLaba,
-                    kalPpn,
-                    kalRpSesuai,
-                    kalRpSesuaiPpn,
-                    ketKalkulasi,
-                    kalKetBeli,
-                    actor,
-                    actor,
-                ]);
-            } catch (eHdr2) {
-                console.warn(
-                    "[PermintaanHarga][SaveHdr2][Warn]",
-                    eHdr2.message,
-                );
-            }
-
             if (divisiNum === 4) {
                 try {
                     // Bersihkan tabel kalkulasi komponen, aksesoris, dtl, dan cetak lama
@@ -733,33 +673,17 @@ const createPermintaanHargaInTransaction = async ({
                         [nomorKalkulasi],
                     );
                     await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_komponen WHERE kk_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
                         "DELETE FROM kalkulasi.tkalkulasi_dtl WHERE kald_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_dtl WHERE kald_nomor = ?",
                         [nomorKalkulasi],
                     );
                     await conn.query(
                         "DELETE FROM kalkulasi.tkalkulasi_aksesories WHERE ka_nomor = ?",
                         [nomorKalkulasi],
                     );
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_aksesories WHERE ka_nomor = ?",
-                        [nomorKalkulasi],
-                    );
 
-                    // Bersihkan tabel-tabel cetak khusus (kalkulasi & kalkulasi2)
+                    // Bersihkan tabel-tabel cetak khusus kalkulasi
                     await conn.query(
                         "DELETE FROM kalkulasi.tkalkulasi_ctk WHERE kc_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_ctk WHERE kc_nomor = ?",
                         [nomorKalkulasi],
                     );
                     await conn.query(
@@ -767,15 +691,7 @@ const createPermintaanHargaInTransaction = async ({
                         [nomorKalkulasi],
                     );
                     await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_cetak WHERE kald_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
                         "DELETE FROM kalkulasi.tkalkulasi_sublim WHERE kald_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_sublim WHERE kald_nomor = ?",
                         [nomorKalkulasi],
                     );
                     await conn.query(
@@ -783,15 +699,7 @@ const createPermintaanHargaInTransaction = async ({
                         [nomorKalkulasi],
                     );
                     await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_dtf WHERE kald_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
                         "DELETE FROM kalkulasi.tkalkulasi_bordir WHERE kald_nomor = ?",
-                        [nomorKalkulasi],
-                    );
-                    await conn.query(
-                        "DELETE FROM kalkulasi.tkalkulasi2_bordir WHERE kald_nomor = ?",
                         [nomorKalkulasi],
                     );
 
@@ -817,19 +725,11 @@ const createPermintaanHargaInTransaction = async ({
                     );
 
                     const dtlSql = `INSERT INTO kalkulasi.tkalkulasi_dtl (kald_nomor, kald_rppotong, kald_rpjahit, kald_rpfinishing, kald_rpkirim, kald_rpbiayaobat) VALUES (?, 0, ?, 0, ?, 0)`;
-                    const dtl2Sql = `INSERT INTO kalkulasi.tkalkulasi2_dtl (kald_nomor, kald_rppotong, kald_rpjahit, kald_rpfinishing, kald_rpkirim, kald_rpbiayaobat) VALUES (?, 0, ?, 0, ?, 0)`;
                     await conn.query(dtlSql, [
                         nomorKalkulasi,
                         biayaKonveksi,
                         ongkirPerPcs,
                     ]);
-                    try {
-                        await conn.query(dtl2Sql, [
-                            nomorKalkulasi,
-                            biayaKonveksi,
-                            ongkirPerPcs,
-                        ]);
-                    } catch (e) {}
 
                     // Insert Komponen Kain
                     const normJenisKain = String(
@@ -907,11 +807,7 @@ const createPermintaanHargaInTransaction = async ({
                     }
                     if (kompValues.length > 0) {
                         const kompSql = `INSERT INTO kalkulasi.tkalkulasi_komponen (kk_nomor, kk_komponen, kk_kg, kk_pabrik, kk_jeniskain, kk_lengan, kk_warna, kk_harga, kk_babaran, kk_pcs, kald_logbody, kald_loglengan, kk_nourut) VALUES ?`;
-                        const komp2Sql = `INSERT INTO kalkulasi.tkalkulasi2_komponen (kk_nomor, kk_komponen, kk_kg, kk_pabrik, kk_jeniskain, kk_lengan, kk_warna, kk_harga, kk_babaran, kk_pcs, kald_logbody, kald_loglengan, kk_nourut) VALUES ?`;
                         await conn.query(kompSql, [kompValues]);
-                        try {
-                            await conn.query(komp2Sql, [kompValues]);
-                        } catch (e) {}
                     }
 
                     // Insert Aksesoris
@@ -934,11 +830,7 @@ const createPermintaanHargaInTransaction = async ({
                             idx + 1,
                         ]);
                         const aksSql = `INSERT INTO kalkulasi.tkalkulasi_aksesories (ka_nomor, ka_aksesories, ka_biaya, ka_nourut) VALUES ?`;
-                        const aks2Sql = `INSERT INTO kalkulasi.tkalkulasi2_aksesories (ka_nomor, ka_aksesories, ka_biaya, ka_nourut) VALUES ?`;
                         await conn.query(aksSql, [aksValues]);
-                        try {
-                            await conn.query(aks2Sql, [aksValues]);
-                        } catch (e) {}
                     }
 
                     // ==========================================
@@ -1009,46 +901,22 @@ const createPermintaanHargaInTransaction = async ({
                         }
                     });
 
-                    // 1. Simpan SABLON ke tkalkulasi_cetak & tkalkulasi2_cetak
+                    // 1. Simpan SABLON ke tkalkulasi_cetak
                     if (totalSablon > 0) {
                         const ctkSql = `INSERT INTO kalkulasi.tkalkulasi_cetak (kald_nomor, kald_rpcetak) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpcetak = VALUES(kald_rpcetak)`;
-                        const ctk2Sql = `INSERT INTO kalkulasi.tkalkulasi2_cetak (kald_nomor, kald_rpcetak) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpcetak = VALUES(kald_rpcetak)`;
                         await conn.query(ctkSql, [nomorKalkulasi, totalSablon]);
-                        try {
-                            await conn.query(ctk2Sql, [
-                                nomorKalkulasi,
-                                totalSablon,
-                            ]);
-                        } catch (e) {}
                     }
 
-                    // 2. Simpan SUBLIM ke tkalkulasi_sublim & tkalkulasi2_sublim
+                    // 2. Simpan SUBLIM ke tkalkulasi_sublim
                     if (totalSublim > 0) {
                         const subSql = `INSERT INTO kalkulasi.tkalkulasi_sublim (kald_nomor, kald_rpsublim) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpsublim = VALUES(kald_rpsublim)`;
-                        const sub2Sql = `INSERT INTO kalkulasi.tkalkulasi2_sublim (kald_nomor, kald_rpsublim) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpsublim = VALUES(kald_rpsublim)`;
                         await conn.query(subSql, [nomorKalkulasi, totalSublim]);
-                        try {
-                            await conn.query(sub2Sql, [
-                                nomorKalkulasi,
-                                totalSublim,
-                            ]);
-                        } catch (e) {}
                     }
 
-                    // 3. Simpan DTF ke tkalkulasi_dtf & tkalkulasi2_dtf
+                    // 3. Simpan DTF ke tkalkulasi_dtf
                     if (dtfItem && dtfItem.biaya > 0) {
                         const dtfSql = `
                             INSERT INTO kalkulasi.tkalkulasi_dtf (
-                                kald_nomor, kald_cmdtf, kald_dtfp1, kald_dtfl1, kald_rpdtf
-                            ) VALUES (?, ?, ?, ?, ?)
-                            ON DUPLICATE KEY UPDATE
-                                kald_cmdtf = VALUES(kald_cmdtf),
-                                kald_dtfp1 = VALUES(kald_dtfp1),
-                                kald_dtfl1 = VALUES(kald_dtfl1),
-                                kald_rpdtf = VALUES(kald_rpdtf)
-                        `;
-                        const dtf2Sql = `
-                            INSERT INTO kalkulasi.tkalkulasi2_dtf (
                                 kald_nomor, kald_cmdtf, kald_dtfp1, kald_dtfl1, kald_rpdtf
                             ) VALUES (?, ?, ?, ?, ?)
                             ON DUPLICATE KEY UPDATE
@@ -1064,31 +932,12 @@ const createPermintaanHargaInTransaction = async ({
                             dtfItem.l,
                             dtfItem.biaya,
                         ]);
-                        try {
-                            await conn.query(dtf2Sql, [
-                                nomorKalkulasi,
-                                dtfItem.cm,
-                                dtfItem.p,
-                                dtfItem.l,
-                                dtfItem.biaya,
-                            ]);
-                        } catch (e) {}
                     }
 
-                    // 4. Simpan BORDIR ke tkalkulasi_bordir & tkalkulasi2_bordir
+                    // 4. Simpan BORDIR ke tkalkulasi_bordir
                     if (bordirItem && bordirItem.biaya > 0) {
                         const borSql = `
                             INSERT INTO kalkulasi.tkalkulasi_bordir (
-                                kald_nomor, kald_cmbordir, kald_bordirp1, kald_bordirl1, kald_rpbordir
-                            ) VALUES (?, ?, ?, ?, ?)
-                            ON DUPLICATE KEY UPDATE
-                                kald_cmbordir = VALUES(kald_cmbordir),
-                                kald_bordirp1 = VALUES(kald_bordirp1),
-                                kald_bordirl1 = VALUES(kald_bordirl1),
-                                kald_rpbordir = VALUES(kald_rpbordir)
-                        `;
-                        const bor2Sql = `
-                            INSERT INTO kalkulasi.tkalkulasi2_bordir (
                                 kald_nomor, kald_cmbordir, kald_bordirp1, kald_bordirl1, kald_rpbordir
                             ) VALUES (?, ?, ?, ?, ?)
                             ON DUPLICATE KEY UPDATE
@@ -1104,15 +953,6 @@ const createPermintaanHargaInTransaction = async ({
                             bordirItem.l,
                             bordirItem.biaya,
                         ]);
-                        try {
-                            await conn.query(bor2Sql, [
-                                nomorKalkulasi,
-                                bordirItem.cm,
-                                bordirItem.p,
-                                bordirItem.l,
-                                bordirItem.biaya,
-                            ]);
-                        } catch (e) {}
                     }
                 } catch (dtlErr) {
                     console.warn(
@@ -1687,10 +1527,6 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
         try {
             await db.query(
                 `UPDATE kalkulasi.tkalkulasi_dtl SET kald_rpkirim = ? WHERE kald_nomor = ?`,
-                [updateOngkirPerPcs, existingNomorKal],
-            );
-            await db.query(
-                `UPDATE kalkulasi.tkalkulasi2_dtl SET kald_rpkirim = ? WHERE kald_nomor = ?`,
                 [updateOngkirPerPcs, existingNomorKal],
             );
         } catch (dtlOngkirErr) {
