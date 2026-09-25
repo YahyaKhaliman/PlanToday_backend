@@ -134,14 +134,18 @@ function bulatkanHargaUp(harga) {
 function kalkulasiGarmenEngine({
     kodeModel = "KH-0001",
     hargaBahan = 0,
+    hargaBahanBesar,
     hargaBahanLengan,
+    hargaBahanLenganBesar,
     bBody = 0,
     bLengan = 0,
     bRib = 70,
     allowancePersen = 17,
+    allowancePersenBesar,
     customAllowance,
     isSport = false,
     customBiayaJahit,
+    customBiayaJahitBesar,
     qty = 1,
     tambahanList = [],
     cetakList = [],
@@ -151,8 +155,29 @@ function kalkulasiGarmenEngine({
     const normModel = String(kodeModel).toUpperCase();
     const numQty = Number(qty) > 0 ? Number(qty) : 1;
     const tiersList = getTiersMargin(normModel, customTiers);
+    const isPartaiBesar = numQty >= 1000;
 
-    const bahan = hitungKomponenBahan({
+    const finalHargaBahanBesar =
+        Number(hargaBahanBesar) > 0
+            ? Number(hargaBahanBesar)
+            : Number(hargaBahan);
+    const finalHargaLenganBesar =
+        Number(hargaBahanLenganBesar) > 0
+            ? Number(hargaBahanLenganBesar)
+            : Number(hargaBahanLengan || hargaBahan);
+    const finalAllowanceBesar =
+        allowancePersenBesar !== undefined &&
+        allowancePersenBesar !== null &&
+        String(allowancePersenBesar) !== ""
+            ? Number(allowancePersenBesar)
+            : Number(allowancePersen);
+    const finalBiayaJahitBesar =
+        customBiayaJahitBesar !== undefined && customBiayaJahitBesar !== null
+            ? Number(customBiayaJahitBesar)
+            : customBiayaJahit;
+
+    // 1. Komponen bahan reguler (<1000 pcs)
+    const bahanReguler = hitungKomponenBahan({
         kodeModel: normModel,
         hargaBahan,
         hargaBahanLengan,
@@ -162,9 +187,35 @@ function kalkulasiGarmenEngine({
         allowancePersen,
         customAllowance,
     });
+    const biayaKonveksiReguler = hitungBiayaKonveksi({
+        isSport,
+        customBiayaJahit,
+    });
+    const hppReguler = bahanReguler.totalBahan + biayaKonveksiReguler;
 
-    const biayaKonveksi = hitungBiayaKonveksi({ isSport, customBiayaJahit });
-    const hpp = bahan.totalBahan + biayaKonveksi;
+    // 2. Komponen bahan partai besar (>=1000 pcs)
+    const bahanBesar = hitungKomponenBahan({
+        kodeModel: normModel,
+        hargaBahan: finalHargaBahanBesar,
+        hargaBahanLengan: finalHargaLenganBesar,
+        bBody,
+        bLengan,
+        bRib,
+        allowancePersen: finalAllowanceBesar,
+        customAllowance,
+    });
+    const biayaKonveksiBesar = hitungBiayaKonveksi({
+        isSport,
+        customBiayaJahit: finalBiayaJahitBesar,
+    });
+    const hppBesar = bahanBesar.totalBahan + biayaKonveksiBesar;
+
+    // Pilih HPP & komponen aktif sesuai kuantitas order
+    const activeBahan = isPartaiBesar ? bahanBesar : bahanReguler;
+    const activeBiayaKonveksi = isPartaiBesar
+        ? biayaKonveksiBesar
+        : biayaKonveksiReguler;
+    const activeHpp = isPartaiBesar ? hppBesar : hppReguler;
 
     // 1. Tambahan: tarif patokan per pcs x kuantitas rencana order
     let totalBiayaTambahanOrder = 0;
@@ -205,8 +256,8 @@ function kalkulasiGarmenEngine({
     const cetakPerPcs = totalCetakPerPcs;
 
     const matchedTier = tentukanTierMargin(numQty, tiersList);
-    const marginRp = Math.round(hpp * (matchedTier.persen / 100));
-    const hargaBahanDasar = hpp + marginRp;
+    const marginRp = Math.round(activeHpp * (matchedTier.persen / 100));
+    const hargaBahanDasar = activeHpp + marginRp;
     const hargaBahanUp = bulatkanHargaUp(hargaBahanDasar);
 
     // Total Kalkulasi = Harga Bahan (UP dari master bahan) + Tambahan/pcs + Cetak/pcs
@@ -216,8 +267,10 @@ function kalkulasiGarmenEngine({
     const totalHargaOrder = Math.round(hargaJualPerPcs * numQty);
 
     const tabelReferensi = tiersList.map((t) => {
-        const m = Math.round(hpp * (t.persen / 100));
-        const j = Math.round(hpp + m);
+        const isTierBesar = Number(t.qmin) >= 1000;
+        const currentHpp = isTierBesar ? hppBesar : hppReguler;
+        const m = Math.round(currentHpp * (t.persen / 100));
+        const j = Math.round(currentHpp + m);
         const u = bulatkanHargaUp(j);
         return {
             tier: t.tier,
@@ -233,10 +286,12 @@ function kalkulasiGarmenEngine({
 
     return {
         komponenBiaya: {
-            ...bahan,
-            biayaKonveksi,
+            ...activeBahan,
+            biayaKonveksi: activeBiayaKonveksi,
         },
-        hpp,
+        hpp: activeHpp,
+        hppReguler,
+        hppBesar,
         tambahan: {
             items: processedTambahan,
             totalPerPcs: tambahanPerPcs,

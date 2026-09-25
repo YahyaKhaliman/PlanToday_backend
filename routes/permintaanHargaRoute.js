@@ -27,7 +27,9 @@ router.get("/permintaan-harga/katalog/customer/:cusKode", auth, controller.getCu
 router.get("/permintaan-harga/customer-so-history/:cusKode", auth, controller.getCustomerSoHistory);
 router.get("/permintaan-harga/customer-so-history", auth, controller.getCustomerSoHistory);
 
-// --- LOOKUPS GARMEN DARI MANKSI PENAWARAN ---
+// --- LOOKUPS GARMEN DARI MANKSI PENAWARAN & SETTING HARGA BAHAN ---
+router.get("/pembelian/setting-harga-bahan/garmen", auth, controller.getKainGarmen);
+router.get("/lookups/garmen-kain", auth, controller.getKainGarmen);
 router.get("/lookups/jenis-kain-minta-harga", auth, controller.getJenisKainMintaHarga);
 router.get("/lookups/tambahan", auth, controller.getTambahanOptions);
 router.get("/lookups/cetak", auth, controller.getCetakOptions);

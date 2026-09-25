@@ -518,12 +518,55 @@ const createPermintaanHargaInTransaction = async ({
 
                     let autoCustomTiers = undefined;
                     try {
-                        const [mRows] = await conn.query(
-                            "SELECT qmin, qmax, margin, model FROM tmintaharga_margin WHERE model = ? ORDER BY qmin",
-                            [normKodeModel],
-                        );
+                        let marginKtg = "COTTON";
+                        const ktgUpper = String(ktgGarmen || "").toUpperCase().trim();
+                        if (
+                            ktgUpper.includes("PE") ||
+                            ktgUpper.includes("HYGIT") ||
+                            ktgUpper.includes("DRYFIT")
+                        ) {
+                            marginKtg = "PE";
+                        } else if (
+                            ktgUpper.includes("LACOST") ||
+                            ktgUpper.includes("PIQUE")
+                        ) {
+                            marginKtg = "LACOST";
+                        }
+
+                        let mRows;
+                        try {
+                            const [rows] = await conn.query(
+                                "SELECT qmin, qmax, margin, model, ktg FROM tmintaharga_margin WHERE model = ? AND (ktg = ? OR ktg IS NULL) ORDER BY qmin",
+                                [normKodeModel, marginKtg],
+                            );
+                            mRows = rows;
+                            if (!mRows || mRows.length === 0) {
+                                const [fallbackRows] = await conn.query(
+                                    "SELECT qmin, qmax, margin, model, ktg FROM tmintaharga_margin WHERE model = ? ORDER BY qmin",
+                                    [normKodeModel],
+                                );
+                                mRows = fallbackRows;
+                            }
+                        } catch (errKtg) {
+                            const [fallbackRows] = await conn.query(
+                                "SELECT qmin, qmax, margin, model FROM tmintaharga_margin WHERE model = ? ORDER BY qmin",
+                                [normKodeModel],
+                            );
+                            mRows = fallbackRows;
+                        }
+
                         if (mRows && mRows.length > 0) {
-                            autoCustomTiers = mRows.map((r) => ({
+                            const seenQ = new Set();
+                            const uniqueMRows = [];
+                            for (const r of mRows) {
+                                const qminVal = Number(r.qmin) || 0;
+                                if (!seenQ.has(qminVal)) {
+                                    seenQ.add(qminVal);
+                                    uniqueMRows.push(r);
+                                }
+                            }
+                            autoCustomTiers = uniqueMRows.map((r, idx) => ({
+                                tier: idx + 1,
                                 min: Number(r.qmin) || 0,
                                 max:
                                     Number(r.qmax) >= 999999
@@ -2548,6 +2591,302 @@ const getPermintaanHargaStatusCounts = async ({
     return statusMap;
 };
 
+// ========================================================
+// 1. GARMEN KAIN (tmintaharga_kain) - Sesuai settingHargaBahanService Manksi
+// ========================================================
+const getKainGarmen = async () => {
+    let rows;
+    try {
+        const [r] = await db.query(
+            "SELECT * FROM tmintaharga_kain ORDER BY mhk_ktg ASC, mhk_jeniskain ASC, mhk_warna ASC",
+        );
+        rows = r;
+    } catch (err) {
+        if (
+            err.code === "ER_BAD_FIELD_ERROR" &&
+            (String(err.sqlMessage).includes("mhk_harga_partaibesar") ||
+                String(err.sqlMessage).includes("mhk_allow_partaibesar"))
+        ) {
+            const [r2] = await db.query(
+                "SELECT *, NULL AS mhk_harga_partaibesar, NULL AS mhk_allow_partaibesar FROM tmintaharga_kain ORDER BY mhk_ktg ASC, mhk_jeniskain ASC, mhk_warna ASC",
+            );
+            rows = r2;
+        } else throw err;
+    }
+
+    const kh0002InfoMap = new Map();
+    const kh0002InfoMapBesar = new Map();
+    rows.forEach((r) => {
+        const kode = (r.mhk_kode || "").trim().toUpperCase();
+        if (kode !== "KH-0002") return;
+        const jk = (r.mhk_jeniskain || "").trim();
+        if (!kh0002InfoMap.has(jk)) {
+            kh0002InfoMap.set(jk, {
+                babaranLengan: 0,
+                hargaTua: 0,
+                fallbackHarga: 0,
+            });
+            kh0002InfoMapBesar.set(jk, {
+                babaranLengan: 0,
+                hargaTua: 0,
+                fallbackHarga: 0,
+            });
+        }
+        const info = kh0002InfoMap.get(jk);
+        const infoB = kh0002InfoMapBesar.get(jk);
+        const komp = (r.mhk_komponen || "").trim().toUpperCase();
+        const warna = (r.mhk_warna || "").trim().toUpperCase();
+        const babaran = Number(r.mhk_babaran) || 0;
+        const harga = Number(r.mhk_harga) || 0;
+        const hargaBesar = Number(r.mhk_harga_partaibesar) || harga || 0;
+
+        if (komp === "LENGAN" && babaran > 0) {
+            info.babaranLengan = babaran;
+            infoB.babaranLengan = babaran;
+            if (!info.fallbackHarga) info.fallbackHarga = harga;
+            if (!infoB.fallbackHarga) infoB.fallbackHarga = hargaBesar;
+        }
+        if (warna === "TUA" && harga > 0) {
+            info.hargaTua = harga;
+        }
+        if (warna === "TUA" && hargaBesar > 0) {
+            infoB.hargaTua = hargaBesar;
+        }
+    });
+
+    const lenganPriceMap = new Map();
+    const lenganPriceMapBesar = new Map();
+    kh0002InfoMap.forEach((info, jk) => {
+        const hrg = info.hargaTua || info.fallbackHarga || 0;
+        if (info.babaranLengan > 0 && hrg > 0) {
+            const dppTua = hrg / 1.11;
+            lenganPriceMap.set(jk, Math.round(dppTua / info.babaranLengan));
+        }
+    });
+    kh0002InfoMapBesar.forEach((info, jk) => {
+        const hrg = info.hargaTua || info.fallbackHarga || 0;
+        if (info.babaranLengan > 0 && hrg > 0) {
+            const dppTua = hrg / 1.11;
+            lenganPriceMapBesar.set(
+                jk,
+                Math.round(dppTua / info.babaranLengan),
+            );
+        }
+    });
+
+    const babaranBodyMap = new Map();
+    rows.forEach((r) => {
+        const kode = (r.mhk_kode || "").trim().toUpperCase();
+        const jk = (r.mhk_jeniskain || "").trim();
+        const key = `${kode}_${jk}`;
+        const komp = (r.mhk_komponen || "").trim().toUpperCase();
+        const val = Number(r.mhk_babaran) || 0;
+        if (!babaranBodyMap.has(key)) babaranBodyMap.set(key, 0);
+        if (komp === "BODY" && val > 0) {
+            babaranBodyMap.set(key, val);
+        } else if (val > 0 && babaranBodyMap.get(key) === 0) {
+            babaranBodyMap.set(key, val);
+        }
+    });
+
+    let biayaJahitRows;
+    try {
+        const [bRows] = await db.query(
+            "SELECT mhb_ket, mhb_biaya, mhb_biaya_partaibesar_kh0001, mhb_biaya_partaibesar_kh0002 FROM tmintaharga_biaya WHERE mhb_jenis = 'JAHIT'",
+        );
+        biayaJahitRows = bRows;
+    } catch (err) {
+        if (
+            err.code === "ER_BAD_FIELD_ERROR" &&
+            String(err.sqlMessage).includes("mhb_biaya_partaibesar")
+        ) {
+            const [bRows] = await db.query(
+                "SELECT mhb_ket, mhb_biaya, NULL AS mhb_biaya_partaibesar_kh0001, NULL AS mhb_biaya_partaibesar_kh0002 FROM tmintaharga_biaya WHERE mhb_jenis = 'JAHIT'",
+            );
+            biayaJahitRows = bRows;
+        } else throw err;
+    }
+    const biayaJahitMap = new Map();
+    const biayaJahitBesarMapKh0001 = new Map();
+    const biayaJahitBesarMapKh0002 = new Map();
+    let defaultBiayaJahit = 5000;
+    let defaultBiayaKh0001 = null;
+    let defaultBiayaKh0002 = null;
+    biayaJahitRows.forEach((b) => {
+        const ket = (b.mhb_ket || "").trim().toUpperCase();
+        const cost = Number(b.mhb_biaya) || 0;
+        const raw1 = b.mhb_biaya_partaibesar_kh0001;
+        const raw2 = b.mhb_biaya_partaibesar_kh0002;
+        const costBesar1 =
+            raw1 !== null && raw1 !== undefined && Number(raw1) !== 0
+                ? Number(raw1)
+                : null;
+        const costBesar2 =
+            raw2 !== null && raw2 !== undefined && Number(raw2) !== 0
+                ? Number(raw2)
+                : null;
+        if (ket === "-" || ket === "") {
+            defaultBiayaJahit = cost;
+            if (costBesar1 !== null) defaultBiayaKh0001 = costBesar1;
+            if (costBesar2 !== null) defaultBiayaKh0002 = costBesar2;
+        } else {
+            biayaJahitMap.set(ket, cost);
+            if (costBesar1 !== null) {
+                if (
+                    !biayaJahitBesarMapKh0001.has(ket) ||
+                    biayaJahitBesarMapKh0001.get(ket) === 0
+                ) {
+                    biayaJahitBesarMapKh0001.set(ket, costBesar1);
+                }
+            }
+            if (costBesar2 !== null) {
+                if (
+                    !biayaJahitBesarMapKh0002.has(ket) ||
+                    biayaJahitBesarMapKh0002.get(ket) === 0
+                ) {
+                    biayaJahitBesarMapKh0002.set(ket, costBesar2);
+                }
+            }
+        }
+    });
+
+    return rows.map((r) => {
+        const kode = (r.mhk_kode || "").trim().toUpperCase();
+        const jk = (r.mhk_jeniskain || "").trim();
+        const ktg = (r.mhk_ktg || "").trim().toUpperCase();
+        const key = `${kode}_${jk}`;
+        const bBody = babaranBodyMap.get(key) || 0;
+        const bLengan =
+            kode === "KH-0002"
+                ? kh0002InfoMap.get(jk)?.babaranLengan || 0
+                : 0;
+        const bLenganBesar =
+            kode === "KH-0002"
+                ? kh0002InfoMapBesar.get(jk)?.babaranLengan || bLengan
+                : 0;
+
+        const hargaBahan = Number(r.mhk_harga) || 0;
+        const hargaBahanBesarRaw = r.mhk_harga_partaibesar;
+        const hargaBahanBesar =
+            hargaBahanBesarRaw !== null &&
+            hargaBahanBesarRaw !== undefined &&
+            Number(hargaBahanBesarRaw) !== 0
+                ? Number(hargaBahanBesarRaw)
+                : hargaBahan;
+        const hargaBody =
+            bBody > 0 ? Math.round(hargaBahan / bBody / 1.11) : 0;
+        const hargaRib = Math.round((hargaBahan / 1.11 + 1500) / 70);
+        const hargaLengan =
+            kode === "KH-0002" ? lenganPriceMap.get(jk) || 0 : 0;
+
+        const hargaBodyBesar =
+            bBody > 0 ? Math.round(hargaBahanBesar / bBody / 1.11) : 0;
+        const hargaRibBesar = Math.round(
+            (hargaBahanBesar / 1.11 + 1500) / 70,
+        );
+        const hargaLenganBesar =
+            kode === "KH-0002"
+                ? lenganPriceMapBesar.get(jk) || hargaLengan
+                : 0;
+
+        const totalHargaBahan = hargaBody + hargaLengan + hargaRib;
+        const allowancePersen = Number(r.mhk_allow) || 0;
+        const allowancePersenBesarRaw = r.mhk_allow_partaibesar;
+        const allowancePersenBesar =
+            allowancePersenBesarRaw !== null &&
+            allowancePersenBesarRaw !== undefined &&
+            String(allowancePersenBesarRaw) !== ""
+                ? Number(allowancePersenBesarRaw)
+                : allowancePersen;
+        const allowanceRp = Math.round(
+            totalHargaBahan * (allowancePersen / 100),
+        );
+        const totalBahan = totalHargaBahan + allowanceRp;
+
+        const totalHargaBahanBesar =
+            hargaBodyBesar + hargaLenganBesar + hargaRibBesar;
+        const allowanceRpBesar = Math.round(
+            totalHargaBahanBesar * (allowancePersenBesar / 100),
+        );
+        const totalBahanBesar = totalHargaBahanBesar + allowanceRpBesar;
+
+        const biayaKonveksi = biayaJahitMap.has(ktg)
+            ? biayaJahitMap.get(ktg)
+            : defaultBiayaJahit;
+        const isKh0001 = kode === "KH-0001";
+        const biayaKonveksiBesar = (() => {
+            const mapBesar = isKh0001
+                ? biayaJahitBesarMapKh0001
+                : biayaJahitBesarMapKh0002;
+            const defBesar = isKh0001
+                ? defaultBiayaKh0001
+                : defaultBiayaKh0002;
+            if (mapBesar.has(ktg)) return mapBesar.get(ktg);
+            if (defBesar !== null && defBesar !== undefined) return defBesar;
+            return biayaKonveksi;
+        })();
+        const hpp = totalBahan + biayaKonveksi;
+        const hppBesar = totalBahanBesar + biayaKonveksiBesar;
+
+        return {
+            ...r,
+            kode: r.mhk_kode,
+            ktg: r.mhk_ktg,
+            jenis_kain: r.mhk_jeniskain,
+            lengan: r.mhk_lengan,
+            komponen: r.mhk_komponen,
+            babaran: r.mhk_babaran,
+            warna: r.mhk_warna,
+            harga: r.mhk_harga,
+            allow: r.mhk_allow,
+            mhk_harga_partaibesar:
+                hargaBahanBesarRaw !== undefined
+                    ? hargaBahanBesarRaw
+                    : null,
+            babaranBody: bBody,
+            babaran_body: bBody,
+            babaranLengan: bLengan,
+            babaran_lengan: bLengan,
+            babaranRib: 70,
+            babaran_rib: 70,
+            mhk_harga_rib: hargaRib,
+            hargaRib,
+            mhk_harga_lengan: hargaLengan,
+            hargaLengan,
+            mhk_harga_body: hargaBody,
+            hargaBody,
+            mhk_total_harga_bahan: totalHargaBahan,
+            totalHargaBahan,
+            mhk_allowance_rp: allowanceRp,
+            allowanceRp,
+            mhk_total_bahan: totalBahan,
+            totalBahan,
+            mhk_biaya_konveksi: biayaKonveksi,
+            biayaKonveksi,
+            mhk_biaya_konveksi_partaibesar: biayaKonveksiBesar,
+            biayaKonveksiBesar,
+            biayaKonveksiPartaiBesar: biayaKonveksiBesar,
+            mhk_hpp: hpp,
+            hpp,
+            mhk_harga_body_partaibesar: hargaBodyBesar,
+            hargaBody_partaibesar: hargaBodyBesar,
+            mhk_harga_rib_partaibesar: hargaRibBesar,
+            hargaRib_partaibesar: hargaRibBesar,
+            mhk_harga_lengan_partaibesar: hargaLenganBesar,
+            hargaLengan_partaibesar: hargaLenganBesar,
+            mhk_total_harga_bahan_partaibesar: totalHargaBahanBesar,
+            totalHargaBahan_partaibesar: totalHargaBahanBesar,
+            mhk_allowance_rp_partaibesar: allowanceRpBesar,
+            allowanceRp_partaibesar: allowanceRpBesar,
+            mhk_total_bahan_partaibesar: totalBahanBesar,
+            totalBahan_partaibesar: totalBahanBesar,
+            mhk_hpp_partaibesar: hppBesar,
+            hpp_partaibesar: hppBesar,
+            hppPartaiBesar: hppBesar,
+        };
+    });
+};
+
 const getKalkulasiOptions = async () => {
     const [spandukBahan] = await db.query(
         `SELECT DISTINCT 
@@ -2582,20 +2921,7 @@ const getKalkulasiOptions = async () => {
          ORDER BY mhmt_id`,
     );
 
-    const [garmenKain] = await db.query(
-        `SELECT 
-            mhk_kode AS kode,
-            mhk_ktg AS ktg,
-            mhk_jeniskain AS jenis_kain,
-            mhk_lengan AS lengan,
-            mhk_komponen AS komponen,
-            mhk_babaran AS babaran,
-            mhk_warna AS warna,
-            mhk_harga AS harga,
-            mhk_allow AS allow
-         FROM tmintaharga_kain
-         ORDER BY mhk_kode, mhk_ktg, mhk_jeniskain, mhk_warna`,
-    );
+    const garmenKain = await getKainGarmen();
 
     const [garmenTambahan] = await db.query(
         `SELECT 
@@ -2992,10 +3318,14 @@ const calculateGarmen = async ({
 
     let ktg = "COTTON";
     let hargaBahan = 0;
+    let hargaBahanBesar = 0;
     let allowancePersen = 17;
+    let allowancePersenBesar = 17;
     let bBody = 0;
     let bLengan = 0;
     let bRib = 70;
+    let hargaBahanLengan = 0;
+    let hargaBahanLenganBesar = 0;
 
     if (kainRows.length > 0) {
         ktg = (kainRows[0].mhk_ktg || "COTTON").toUpperCase().trim();
@@ -3003,6 +3333,7 @@ const calculateGarmen = async ({
             kainRows[0].mhk_allow,
             ktg === "PE" || ktg === "HYGIT" || ktg === "DRYFIT" ? 5 : 17,
         );
+        allowancePersenBesar = allowancePersen;
 
         // Kumpulkan babaran (BODY, LENGAN, RIB) dari seluruh baris model & jenis kain ini
         kainRows.forEach((r) => {
@@ -3014,7 +3345,6 @@ const calculateGarmen = async ({
             else if (val > 0 && bBody === 0) bBody = val;
         });
 
-        // Ambil harga bahan & allowance yang spesifik sesuai pilihan warna
         const matchedWarna = kainRows.find(
             (r) => (r.mhk_warna || "").toUpperCase().trim() === normWarna,
         );
@@ -3029,12 +3359,61 @@ const calculateGarmen = async ({
                     allowancePersen,
                 );
             }
+            if (
+                matchedWarna.mhk_harga_partaibesar !== null &&
+                matchedWarna.mhk_harga_partaibesar !== undefined &&
+                Number(matchedWarna.mhk_harga_partaibesar) > 0
+            ) {
+                hargaBahanBesar = toNumber(
+                    matchedWarna.mhk_harga_partaibesar,
+                    hargaBahan,
+                );
+            } else {
+                hargaBahanBesar = hargaBahan;
+            }
+            if (
+                matchedWarna.mhk_allow_partaibesar !== null &&
+                matchedWarna.mhk_allow_partaibesar !== undefined &&
+                String(matchedWarna.mhk_allow_partaibesar) !== ""
+            ) {
+                allowancePersenBesar = toNumber(
+                    matchedWarna.mhk_allow_partaibesar,
+                    allowancePersen,
+                );
+            } else {
+                allowancePersenBesar = allowancePersen;
+            }
         } else {
             hargaBahan = toNumber(kainRows[0].mhk_harga, 0);
+            if (
+                kainRows[0].mhk_harga_partaibesar !== null &&
+                kainRows[0].mhk_harga_partaibesar !== undefined &&
+                Number(kainRows[0].mhk_harga_partaibesar) > 0
+            ) {
+                hargaBahanBesar = toNumber(
+                    kainRows[0].mhk_harga_partaibesar,
+                    hargaBahan,
+                );
+            } else {
+                hargaBahanBesar = hargaBahan;
+            }
+            if (
+                kainRows[0].mhk_allow_partaibesar !== null &&
+                kainRows[0].mhk_allow_partaibesar !== undefined &&
+                String(kainRows[0].mhk_allow_partaibesar) !== ""
+            ) {
+                allowancePersenBesar = toNumber(
+                    kainRows[0].mhk_allow_partaibesar,
+                    allowancePersen,
+                );
+            } else {
+                allowancePersenBesar = allowancePersen;
+            }
         }
 
         // Pada KH-0002 cari harga kain warna TUA untuk lengan
-        var hargaBahanLengan = 0;
+        hargaBahanLengan = 0;
+        hargaBahanLenganBesar = 0;
         if (normKodeModel === "KH-0002") {
             const rowTua = kainRows.find(
                 (r) =>
@@ -3044,6 +3423,14 @@ const calculateGarmen = async ({
             hargaBahanLengan = rowTua
                 ? toNumber(rowTua.mhk_harga, 0)
                 : hargaBahan;
+            const rowTuaBesar = kainRows.find(
+                (r) =>
+                    (r.mhk_warna || "").toUpperCase().trim() === "TUA" &&
+                    Number(r.mhk_harga_partaibesar) > 0,
+            );
+            hargaBahanLenganBesar = rowTuaBesar
+                ? toNumber(rowTuaBesar.mhk_harga_partaibesar, 0)
+                : hargaBahanLengan;
         }
     }
 
@@ -3232,16 +3619,69 @@ const calculateGarmen = async ({
 
     const isSport = ktg === "PE" || ktg === "HYGIT" || ktg === "DRYFIT";
 
-    const [marginRows] = await db.query(
-        `SELECT qmin, qmax, margin, persen, model 
-         FROM tmintaharga_margin 
-         WHERE model = ? 
-         ORDER BY qmin`,
-        [normKodeModel],
-    );
+    let marginKtg = "COTTON";
+    const ktgUpper = String(ktg || "").toUpperCase().trim();
+    if (
+        ktgUpper.includes("PE") ||
+        ktgUpper.includes("HYGIT") ||
+        ktgUpper.includes("DRYFIT")
+    ) {
+        marginKtg = "PE";
+    } else if (
+        ktgUpper.includes("LACOST") ||
+        ktgUpper.includes("PIQUE")
+    ) {
+        marginKtg = "LACOST";
+    }
+
+    let marginRows;
+    try {
+        const [mRows] = await db.query(
+            `SELECT qmin, qmax, margin, persen, model, ktg 
+             FROM tmintaharga_margin 
+             WHERE model = ? AND (ktg = ? OR ktg IS NULL)
+             ORDER BY qmin`,
+            [normKodeModel, marginKtg],
+        );
+        marginRows = mRows;
+        if (!marginRows || marginRows.length === 0) {
+            const [fallbackRows] = await db.query(
+                `SELECT qmin, qmax, margin, persen, model, ktg 
+                 FROM tmintaharga_margin 
+                 WHERE model = ? 
+                 ORDER BY qmin`,
+                [normKodeModel],
+            );
+            marginRows = fallbackRows;
+        }
+    } catch (mErr) {
+        if (
+            mErr.code === "ER_BAD_FIELD_ERROR" &&
+            String(mErr.sqlMessage).includes("ktg")
+        ) {
+            const [mRows] = await db.query(
+                `SELECT qmin, qmax, margin, persen, model 
+                 FROM tmintaharga_margin 
+                 WHERE model = ? 
+                 ORDER BY qmin`,
+                [normKodeModel],
+            );
+            marginRows = mRows;
+        } else throw mErr;
+    }
+
     let customTiers = null;
     if (marginRows && marginRows.length > 0) {
-        customTiers = marginRows.map((r, idx) => {
+        const seenMarginQmin = new Set();
+        const uniqueMarginRows = [];
+        for (const r of marginRows) {
+            const q = Number(r.qmin) || 0;
+            if (!seenMarginQmin.has(q)) {
+                seenMarginQmin.add(q);
+                uniqueMarginRows.push(r);
+            }
+        }
+        customTiers = uniqueMarginRows.map((r, idx) => {
             const qmin = Number(r.qmin) || 0;
             const qmax = Number(r.qmax) || 999999;
             const persen = Number(r.margin) || 0;
@@ -3259,9 +3699,9 @@ const calculateGarmen = async ({
 
     // Ambil master biaya jahit konveksi dari DB jika tidak ditentukan
     let dbBiayaJahit = null;
+    let dbBiayaJahitBesar = null;
     if (customBiayaJahit === undefined || customBiayaJahit === null) {
         try {
-            const isPartaiBesarJahit = numQty >= 1000;
             const colPartaiBesar =
                 normKodeModel === "KH-0002"
                     ? "mhb_biaya_partaibesar_kh0002"
@@ -3296,10 +3736,8 @@ const calculateGarmen = async ({
                 if (rowJahit) {
                     const biayaNormal = Number(rowJahit.mhb_biaya) || 0;
                     const biayaBesar = Number(rowJahit.mhb_biaya_partaibesar) || 0;
-                    dbBiayaJahit =
-                        isPartaiBesarJahit && biayaBesar > 0
-                            ? biayaBesar
-                            : biayaNormal;
+                    dbBiayaJahit = biayaNormal;
+                    dbBiayaJahitBesar = biayaBesar > 0 ? biayaBesar : biayaNormal;
                 }
             }
         } catch (jErr) {
@@ -3314,18 +3752,25 @@ const calculateGarmen = async ({
         customTiers,
         kodeModel: normKodeModel,
         hargaBahan,
+        hargaBahanBesar,
         hargaBahanLengan:
             typeof hargaBahanLengan !== "undefined" ? hargaBahanLengan : 0,
+        hargaBahanLenganBesar:
+            typeof hargaBahanLenganBesar !== "undefined"
+                ? hargaBahanLenganBesar
+                : 0,
         bBody,
         bLengan,
         bRib,
         allowancePersen,
+        allowancePersenBesar,
         customAllowance,
         isSport,
         customBiayaJahit:
             customBiayaJahit !== undefined && customBiayaJahit !== null
                 ? customBiayaJahit
                 : dbBiayaJahit,
+        customBiayaJahitBesar: dbBiayaJahitBesar,
         qty: numQty,
         tambahanList: resolvedTambahan,
         cetakList: resolvedCetak,
@@ -3369,18 +3814,20 @@ const calculateGarmen = async ({
 };
 
 const getJenisKainMintaHarga = async (kode = "KH-0001") => {
-    const [rows] = await db.query(
-        `SELECT DISTINCT 
+    let sql = `SELECT DISTINCT 
             mhk_jeniskain AS mhk_kain,
             mhk_jeniskain AS Jeniskain,
             mhk_jeniskain AS nama,
             mhk_ktg AS mhk_ktg,
             mhk_ktg AS Kategori
-         FROM tmintaharga_kain 
-         WHERE mhk_kode = ? 
-         ORDER BY mhk_jeniskain`,
-        [kode],
-    );
+         FROM tmintaharga_kain`;
+    const params = [];
+    if (kode) {
+        sql += ` WHERE (mhk_kode = ? OR mhk_kode = '' OR mhk_kode IS NULL)`;
+        params.push(kode);
+    }
+    sql += ` ORDER BY mhk_ktg ASC, mhk_jeniskain ASC`;
+    const [rows] = await db.query(sql, params);
     return rows;
 };
 
@@ -3684,6 +4131,7 @@ module.exports = {
     calculateSpanduk,
     calculateMmt,
     calculateGarmen,
+    getKainGarmen,
     getJenisKainMintaHarga,
     getTambahanOptions,
     getCetakOptions,

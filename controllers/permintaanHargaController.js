@@ -394,6 +394,16 @@ const calculateGarmen = async (req, res) => {
     }
 };
 
+const getKainGarmen = async (req, res) => {
+    try {
+        const data = await permintaanHargaService.getKainGarmen();
+        return res.json({ success: true, data });
+    } catch (err) {
+        console.error("[PermintaanHarga][Lookup][KainGarmen][Error]", err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
 const getJenisKainMintaHarga = async (req, res) => {
     try {
         const { kode = "KH-0001" } = req.query;
@@ -464,6 +474,7 @@ module.exports = {
     calculateSpanduk,
     calculateMmt,
     calculateGarmen,
+    getKainGarmen,
     getJenisKainMintaHarga,
     getTambahanOptions,
     getCetakOptions,
