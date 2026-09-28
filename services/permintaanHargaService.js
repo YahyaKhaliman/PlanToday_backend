@@ -265,6 +265,10 @@ const createPermintaanHargaInTransaction = async ({
 
     let nomorKalkulasi = String(payload.mh_nomor_kalkulasi || "").trim();
     let dateKalkulasi = payload.mh_date_kalkulasi || null;
+    let kalPpn = 0;
+    let kalRpSesuai = 0;
+    let kalRpSesuaiPpn = 0;
+    let kalRpSales = 0;
 
     if (hargaKalkulasi > 0) {
         if (!nomorKalkulasi) {
@@ -281,19 +285,12 @@ const createPermintaanHargaInTransaction = async ({
             payload.is_ppn === true ||
             payload.is_inc_ppn === true;
 
-        let kalPpn = 0;
-        let kalRpSesuai = hargaKalkulasi;
-        let kalRpSesuaiPpn = hargaKalkulasi;
-
-        if (isIncludePpn) {
-            kalPpn = 11;
-            kalRpSesuaiPpn = hargaKalkulasi;
-            kalRpSesuai = Math.round(hargaKalkulasi / 1.11);
-        } else {
-            kalPpn = 0;
-            kalRpSesuai = hargaKalkulasi;
-            kalRpSesuaiPpn = Math.round(hargaKalkulasi * 1.11);
-        }
+        kalPpn = isIncludePpn ? 11 : 0;
+        kalRpSesuai = 0;
+        kalRpSesuaiPpn = 0;
+        kalRpSales = isIncludePpn
+            ? Math.round(hargaKalkulasi / 1.11)
+            : hargaKalkulasi;
 
         const modelKhKode = String(
             payload.garmen_model ||
@@ -618,52 +615,126 @@ const createPermintaanHargaInTransaction = async ({
 
         try {
             // 1. Simpan Header Kalkulasi ke tkalkulasi_hdr
-            const hdrSql = `
-                INSERT INTO kalkulasi.tkalkulasi_hdr (
-                    kal_nomor, kal_mh_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
-                    kal_order, kal_rencanaorder, kal_rpallowance, kal_allowance,
-                    kal_rplaba, kal_laba, kal_persen, kal_pakaiobat, kal_ppn,
-                    kal_rpsesuai, kal_rpsesuaippn, kal_ket, kal_ketbeli,
-                    user_create, date_create
-                ) VALUES (?, ?, ?, NOW(), ?, ?, 0, ?, ?, ?, ?, ?, 'Y', 'N', ?, ?, ?, ?, ?, ?, NOW())
-                ON DUPLICATE KEY UPDATE
-                    kal_mh_nomor = VALUES(kal_mh_nomor),
-                    kal_project = VALUES(kal_project),
-                    kal_cus = VALUES(kal_cus),
-                    kal_kh_kode = VALUES(kal_kh_kode),
-                    kal_rencanaorder = VALUES(kal_rencanaorder),
-                    kal_rpallowance = VALUES(kal_rpallowance),
-                    kal_allowance = VALUES(kal_allowance),
-                    kal_rplaba = VALUES(kal_rplaba),
-                    kal_laba = VALUES(kal_laba),
-                    kal_ppn = VALUES(kal_ppn),
-                    kal_rpsesuai = VALUES(kal_rpsesuai),
-                    kal_rpsesuaippn = VALUES(kal_rpsesuaippn),
-                    kal_ket = VALUES(kal_ket),
-                    kal_ketbeli = VALUES(kal_ketbeli),
-                    user_modified = ?,
-                    date_modified = NOW()
-            `;
+            let hasKalRpSalesCol = true;
+            try {
+                const [chk] = await conn.query(
+                    "SHOW COLUMNS FROM kalkulasi.tkalkulasi_hdr LIKE 'kal_rpsales'",
+                );
+                hasKalRpSalesCol = Array.isArray(chk) && chk.length > 0;
+                if (!hasKalRpSalesCol) {
+                    try {
+                        await conn.query(
+                            "ALTER TABLE kalkulasi.tkalkulasi_hdr ADD COLUMN kal_rpsales DOUBLE DEFAULT 0 AFTER kal_rpsesuaippn",
+                        );
+                        hasKalRpSalesCol = true;
+                    } catch (altErr) {
+                        console.warn(
+                            "[PermintaanHarga][AlterKalRpSales][Warn]",
+                            altErr.message,
+                        );
+                    }
+                }
+            } catch (e) {
+                hasKalRpSalesCol = false;
+            }
 
-            await conn.query(hdrSql, [
-                nomorKalkulasi,
-                nomor,
-                String(payload.mh_nama || "").trim(),
-                String(payload.mh_cus_nama || "").trim(),
-                modelKhKode,
-                toNumber(payload.mh_jmlorder, 0),
-                kalRpAllowance,
-                kalAllowance,
-                kalRpLaba,
-                kalLaba,
-                kalPpn,
-                kalRpSesuai,
-                kalRpSesuaiPpn,
-                ketKalkulasi,
-                kalKetBeli,
-                actor,
-                actor,
-            ]);
+            if (hasKalRpSalesCol) {
+                const hdrSql = `
+                    INSERT INTO kalkulasi.tkalkulasi_hdr (
+                        kal_nomor, kal_mh_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
+                        kal_order, kal_rencanaorder, kal_rpallowance, kal_allowance,
+                        kal_rplaba, kal_laba, kal_persen, kal_pakaiobat, kal_ppn,
+                        kal_rpsesuai, kal_rpsesuaippn, kal_rpsales, kal_ket, kal_ketbeli,
+                        user_create, date_create
+                    ) VALUES (?, ?, ?, NOW(), ?, ?, 0, ?, ?, ?, ?, ?, 'Y', 'N', ?, ?, ?, ?, ?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        kal_mh_nomor = VALUES(kal_mh_nomor),
+                        kal_project = VALUES(kal_project),
+                        kal_cus = VALUES(kal_cus),
+                        kal_kh_kode = VALUES(kal_kh_kode),
+                        kal_rencanaorder = VALUES(kal_rencanaorder),
+                        kal_rpallowance = VALUES(kal_rpallowance),
+                        kal_allowance = VALUES(kal_allowance),
+                        kal_rplaba = VALUES(kal_rplaba),
+                        kal_laba = VALUES(kal_laba),
+                        kal_ppn = VALUES(kal_ppn),
+                        kal_rpsesuai = VALUES(kal_rpsesuai),
+                        kal_rpsesuaippn = VALUES(kal_rpsesuaippn),
+                        kal_rpsales = VALUES(kal_rpsales),
+                        kal_ket = VALUES(kal_ket),
+                        kal_ketbeli = VALUES(kal_ketbeli),
+                        user_modified = ?,
+                        date_modified = NOW()
+                `;
+
+                await conn.query(hdrSql, [
+                    nomorKalkulasi,
+                    nomor,
+                    String(payload.mh_nama || "").trim(),
+                    String(payload.mh_cus_nama || "").trim(),
+                    modelKhKode,
+                    toNumber(payload.mh_jmlorder, 0),
+                    kalRpAllowance,
+                    kalAllowance,
+                    kalRpLaba,
+                    kalLaba,
+                    kalPpn,
+                    kalRpSesuai,
+                    kalRpSesuaiPpn,
+                    kalRpSales,
+                    ketKalkulasi,
+                    kalKetBeli,
+                    actor,
+                    actor,
+                ]);
+            } else {
+                const hdrSql = `
+                    INSERT INTO kalkulasi.tkalkulasi_hdr (
+                        kal_nomor, kal_mh_nomor, kal_project, kal_tanggal, kal_cus, kal_kh_kode,
+                        kal_order, kal_rencanaorder, kal_rpallowance, kal_allowance,
+                        kal_rplaba, kal_laba, kal_persen, kal_pakaiobat, kal_ppn,
+                        kal_rpsesuai, kal_rpsesuaippn, kal_ket, kal_ketbeli,
+                        user_create, date_create
+                    ) VALUES (?, ?, ?, NOW(), ?, ?, 0, ?, ?, ?, ?, ?, 'Y', 'N', ?, ?, ?, ?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        kal_mh_nomor = VALUES(kal_mh_nomor),
+                        kal_project = VALUES(kal_project),
+                        kal_cus = VALUES(kal_cus),
+                        kal_kh_kode = VALUES(kal_kh_kode),
+                        kal_rencanaorder = VALUES(kal_rencanaorder),
+                        kal_rpallowance = VALUES(kal_rpallowance),
+                        kal_allowance = VALUES(kal_allowance),
+                        kal_rplaba = VALUES(kal_rplaba),
+                        kal_laba = VALUES(kal_laba),
+                        kal_ppn = VALUES(kal_ppn),
+                        kal_rpsesuai = VALUES(kal_rpsesuai),
+                        kal_rpsesuaippn = VALUES(kal_rpsesuaippn),
+                        kal_ket = VALUES(kal_ket),
+                        kal_ketbeli = VALUES(kal_ketbeli),
+                        user_modified = ?,
+                        date_modified = NOW()
+                `;
+
+                await conn.query(hdrSql, [
+                    nomorKalkulasi,
+                    nomor,
+                    String(payload.mh_nama || "").trim(),
+                    String(payload.mh_cus_nama || "").trim(),
+                    modelKhKode,
+                    toNumber(payload.mh_jmlorder, 0),
+                    kalRpAllowance,
+                    kalAllowance,
+                    kalRpLaba,
+                    kalLaba,
+                    kalPpn,
+                    kalRpSesuai,
+                    kalRpSesuaiPpn,
+                    ketKalkulasi,
+                    kalKetBeli,
+                    actor,
+                    actor,
+                ]);
+            }
 
             if (divisiNum === 4) {
                 try {
@@ -1060,9 +1131,16 @@ const createPermintaanHargaInTransaction = async ({
         else workshopGarmen = "P01";
     }
 
-    // Jika status bukan DONE (misalnya NEGO), kosongkan kolom nomor dan tanggal kalkulasi di tmintaharga
-    const mhNomorKalkulasi = initialStatus === "DONE" ? nomorKalkulasi : null;
-    const mhDateKalkulasi = initialStatus === "DONE" ? dateKalkulasi : null;
+    // Pada tmintaharga.mh_harga_kalkulasi ambil dari kal_rpsales, jika kal_ppn > 0 kalikan dulu sebelum masuk ke mh_harga_kalkulasi
+    let calculatedMhHargaKalkulasi = 0;
+    if (hargaKalkulasi > 0 || kalRpSales > 0) {
+        calculatedMhHargaKalkulasi = kalPpn > 0
+            ? Math.round(kalRpSales * (1 + kalPpn / 100))
+            : kalRpSales;
+    }
+    const mhHargaKalkulasi = calculatedMhHargaKalkulasi;
+    const mhNomorKalkulasi = nomorKalkulasi || null;
+    const mhDateKalkulasi = dateKalkulasi || null;
 
     // Coba insert dengan kolom mh_workshop, fallback jika kolom belum ada di DB (ER_BAD_FIELD_ERROR)
     try {
@@ -1106,7 +1184,7 @@ const createPermintaanHargaInTransaction = async ({
                 workshopGarmen,
                 initialStatus,
                 actor,
-                hargaKalkulasi,
+                mhHargaKalkulasi,
                 String(payload.mh_ket_kalkulasi || "").trim(),
                 mhNomorKalkulasi,
                 mhDateKalkulasi,
@@ -1154,7 +1232,7 @@ const createPermintaanHargaInTransaction = async ({
                         .toUpperCase(),
                     initialStatus,
                     actor,
-                    hargaKalkulasi,
+                    mhHargaKalkulasi,
                     String(payload.mh_ket_kalkulasi || "").trim(),
                     mhNomorKalkulasi,
                     mhDateKalkulasi,
@@ -1305,7 +1383,53 @@ const getPermintaanHargaDetail = async ({
     const row = rows[0];
     row.kald_rpkirim = 0;
     row.mh_ongkir = 0;
+    row.kal_rpsales = 0;
+    row.kal_ppn = 0;
+    row.kal_rpsesuai = 0;
+    row.kal_rpsesuaippn = 0;
+
     if (row.mh_nomor_kalkulasi) {
+        try {
+            const [hdrRows] = await db.query(
+                `SELECT kal_ppn, kal_rpsesuai, kal_rpsesuaippn, 
+                        COALESCE(kal_rpsales, 0) AS kal_rpsales 
+                 FROM kalkulasi.tkalkulasi_hdr 
+                 WHERE kal_nomor = ? LIMIT 1`,
+                [row.mh_nomor_kalkulasi],
+            );
+            if (hdrRows?.[0]) {
+                row.kal_ppn = Number(hdrRows[0].kal_ppn) || 0;
+                row.kal_rpsesuai = Number(hdrRows[0].kal_rpsesuai) || 0;
+                row.kal_rpsesuaippn = Number(hdrRows[0].kal_rpsesuaippn) || 0;
+                row.kal_rpsales = Number(hdrRows[0].kal_rpsales) || 0;
+            }
+        } catch (hdrErr) {
+            try {
+                const [hdrFallback] = await db.query(
+                    `SELECT kal_ppn, kal_rpsesuai, kal_rpsesuaippn 
+                     FROM kalkulasi.tkalkulasi_hdr 
+                     WHERE kal_nomor = ? LIMIT 1`,
+                    [row.mh_nomor_kalkulasi],
+                );
+                if (hdrFallback?.[0]) {
+                    row.kal_ppn = Number(hdrFallback[0].kal_ppn) || 0;
+                    row.kal_rpsesuai = Number(hdrFallback[0].kal_rpsesuai) || 0;
+                    row.kal_rpsesuaippn = Number(hdrFallback[0].kal_rpsesuaippn) || 0;
+                    row.kal_rpsales = 0;
+                }
+            } catch (fbErr) {}
+        }
+
+        if (row.kal_rpsales > 0) {
+            const calcWithPpn =
+                row.kal_ppn > 0
+                    ? Math.round(row.kal_rpsales * (1 + row.kal_ppn / 100))
+                    : row.kal_rpsales;
+            if (!row.mh_harga_kalkulasi || row.mh_harga_kalkulasi === 0) {
+                row.mh_harga_kalkulasi = calcWithPpn;
+            }
+        }
+
         try {
             const [dtlRows] = await db.query(
                 `SELECT kald_rpkirim FROM kalkulasi.tkalkulasi_dtl WHERE kald_nomor = ? LIMIT 1`,
