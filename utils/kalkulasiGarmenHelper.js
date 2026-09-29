@@ -77,7 +77,8 @@ function hitungKomponenBahan({
             ? Number(customAllowance)
             : Number(allowancePersen);
 
-    const hargaBody = bBody > 0 ? Math.round(Number(hargaBahan) / Number(bBody) / 1.11) : 0;
+    const hargaBody =
+        bBody > 0 ? Math.round(Number(hargaBahan) / Number(bBody) / 1.11) : 0;
 
     let hargaLengan = 0;
     if (normModel === "KH-0002" && Number(bLengan) > 0) {
@@ -91,7 +92,9 @@ function hitungKomponenBahan({
     }
 
     const pembagiRib = Number(bRib) >= 10 ? Number(bRib) : 70;
-    const hargaRib = Math.round((Number(hargaBahan) / 1.11 + 1500) / pembagiRib);
+    const hargaRib = Math.round(
+        (Number(hargaBahan) / 1.11 + 1500) / pembagiRib,
+    );
 
     const totalHargaBahan = hargaBody + hargaLengan + hargaRib;
     const allowanceRp = Math.round(totalHargaBahan * (finalAllowance / 100));

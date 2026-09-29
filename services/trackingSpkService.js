@@ -17,11 +17,14 @@ const getTrackingSpkList = async ({
 
     let filterStatusSql = "";
     if (filterStatus === "sudah") {
-        filterStatusSql = "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) >= s.spk_jumlah";
+        filterStatusSql =
+            "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) >= s.spk_jumlah";
     } else if (filterStatus === "proses") {
-        filterStatusSql = "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) < s.spk_jumlah AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) > 0";
+        filterStatusSql =
+            "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) < s.spk_jumlah AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) > 0";
     } else if (filterStatus === "belum") {
-        filterStatusSql = "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) = 0";
+        filterStatusSql =
+            "AND COALESCE((SELECT SUM(sjd.SJD_Jumlah) FROM tsj_dtl sjd WHERE sjd.SJD_SPK_Nomor = s.spk_nomor), 0) = 0";
     }
 
     let searchSql = "";
@@ -141,7 +144,9 @@ const getTrackingSpkStatusCounts = async ({
     };
 
     for (const row of rows || []) {
-        const statusKey = String(row?.status_tracking || "").trim().toUpperCase();
+        const statusKey = String(row?.status_tracking || "")
+            .trim()
+            .toUpperCase();
         if (statusKey in statusMap) {
             statusMap[statusKey] = Number(row?.jumlah || 0);
         }

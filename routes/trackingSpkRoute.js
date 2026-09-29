@@ -9,10 +9,6 @@ router.get(
     trackingSpkController.getTrackingSpkStatusCounts,
 );
 
-router.get(
-    "/tracking-spk",
-    auth,
-    trackingSpkController.getTrackingSpkList,
-);
+router.get("/tracking-spk", auth, trackingSpkController.getTrackingSpkList);
 
 module.exports = router;

@@ -14,23 +14,71 @@ router.get(
 );
 
 // --- ROUTES ENGINE KALKULASI SPANDUK & MMT & GARMEN & ONGKIR ---
-router.get("/permintaan-harga/kalkulasi/options", auth, controller.getKalkulasiOptions);
-router.get("/permintaan-harga/kalkulasi/ongkir/options", auth, controller.getOngkirOptions);
-router.post("/permintaan-harga/kalkulasi/ongkir/calculate", auth, controller.calculateOngkir);
-router.post("/permintaan-harga/kalkulasi/spanduk/calculate", auth, controller.calculateSpanduk);
-router.post("/permintaan-harga/kalkulasi/mmt/calculate", auth, controller.calculateMmt);
-router.post("/permintaan-harga/kalkulasi/garmen/calculate", auth, controller.calculateGarmen);
+router.get(
+    "/permintaan-harga/kalkulasi/options",
+    auth,
+    controller.getKalkulasiOptions,
+);
+router.get(
+    "/permintaan-harga/kalkulasi/ongkir/options",
+    auth,
+    controller.getOngkirOptions,
+);
+router.post(
+    "/permintaan-harga/kalkulasi/ongkir/calculate",
+    auth,
+    controller.calculateOngkir,
+);
+router.post(
+    "/permintaan-harga/kalkulasi/spanduk/calculate",
+    auth,
+    controller.calculateSpanduk,
+);
+router.post(
+    "/permintaan-harga/kalkulasi/mmt/calculate",
+    auth,
+    controller.calculateMmt,
+);
+router.post(
+    "/permintaan-harga/kalkulasi/garmen/calculate",
+    auth,
+    controller.calculateGarmen,
+);
 
 // --- RIWAYAT HARGA SO CUSTOMER (PERSIS ENDPOINT MANKSI & ALIAS) ---
-router.get("/penjualan/minta-harga-form/katalog/customer/:cusKode", auth, controller.getCustomerSoHistory);
-router.get("/permintaan-harga/katalog/customer/:cusKode", auth, controller.getCustomerSoHistory);
-router.get("/permintaan-harga/customer-so-history/:cusKode", auth, controller.getCustomerSoHistory);
-router.get("/permintaan-harga/customer-so-history", auth, controller.getCustomerSoHistory);
+router.get(
+    "/penjualan/minta-harga-form/katalog/customer/:cusKode",
+    auth,
+    controller.getCustomerSoHistory,
+);
+router.get(
+    "/permintaan-harga/katalog/customer/:cusKode",
+    auth,
+    controller.getCustomerSoHistory,
+);
+router.get(
+    "/permintaan-harga/customer-so-history/:cusKode",
+    auth,
+    controller.getCustomerSoHistory,
+);
+router.get(
+    "/permintaan-harga/customer-so-history",
+    auth,
+    controller.getCustomerSoHistory,
+);
 
 // --- LOOKUPS GARMEN DARI MANKSI PENAWARAN & SETTING HARGA BAHAN ---
-router.get("/pembelian/setting-harga-bahan/garmen", auth, controller.getKainGarmen);
+router.get(
+    "/pembelian/setting-harga-bahan/garmen",
+    auth,
+    controller.getKainGarmen,
+);
 router.get("/lookups/garmen-kain", auth, controller.getKainGarmen);
-router.get("/lookups/jenis-kain-minta-harga", auth, controller.getJenisKainMintaHarga);
+router.get(
+    "/lookups/jenis-kain-minta-harga",
+    auth,
+    controller.getJenisKainMintaHarga,
+);
 router.get("/lookups/tambahan", auth, controller.getTambahanOptions);
 router.get("/lookups/cetak", auth, controller.getCetakOptions);
 router.get("/jenis-kain-minta-harga", auth, controller.getJenisKainMintaHarga);

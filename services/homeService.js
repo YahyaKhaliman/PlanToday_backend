@@ -510,7 +510,15 @@ const updateVisitPlan = async ({ id, tanggal_plan, note, catatan }) => {
     };
 };
 
-const createVisit = async ({ user, cus_kode, tanggal, note, catatan, latitude, longitude }) => {
+const createVisit = async ({
+    user,
+    cus_kode,
+    tanggal,
+    note,
+    catatan,
+    latitude,
+    longitude,
+}) => {
     if (!user || !cus_kode || !tanggal) {
         return {
             status: 400,
@@ -674,7 +682,14 @@ const getVisitDraft = async ({ user, cus_kode, tanggal }) => {
     return rows?.[0] || null;
 };
 
-const updateVisit = async ({ id, note, catatan, tanggal, latitude, longitude }) => {
+const updateVisit = async ({
+    id,
+    note,
+    catatan,
+    tanggal,
+    latitude,
+    longitude,
+}) => {
     if (!id) {
         return {
             status: 400,
@@ -693,7 +708,8 @@ const updateVisit = async ({ id, note, catatan, tanggal, latitude, longitude }) 
                 status: 400,
                 body: {
                     success: false,
-                    message: "Tanggal kunjungan tidak boleh kurang dari hari ini",
+                    message:
+                        "Tanggal kunjungan tidak boleh kurang dari hari ini",
                 },
             };
         }
@@ -860,10 +876,7 @@ const rekapVisitWA = async ({ user, start, end, cabang }) => {
 };
 
 const updateRekapVisit = async ({ id, note }) => {
-    await db.query("UPDATE tkunjungan SET note = ? WHERE id = ?", [
-        note,
-        id,
-    ]);
+    await db.query("UPDATE tkunjungan SET note = ? WHERE id = ?", [note, id]);
 };
 
 const getRekapVisitPlan = async ({
@@ -954,13 +967,7 @@ const getRekapVisitPlan = async ({
         INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
         WHERE k.user = ?
         `;
-        params = [
-            user,
-            tanggal_awal,
-            tanggal_akhir,
-            publicBaseUrl,
-            user,
-        ];
+        params = [user, tanggal_awal, tanggal_akhir, publicBaseUrl, user];
 
         if (cabang) {
             sql += ` AND ka.kar_cabang = ?`;
@@ -1218,10 +1225,10 @@ const gantiPassword = async ({ user, oldPassword, newPassword }) => {
         };
     }
 
-    await db.query(
-        `UPDATE tkaryawan SET kar_password = ? WHERE kar_nama = ?`,
-        [newPassword, user],
-    );
+    await db.query(`UPDATE tkaryawan SET kar_password = ? WHERE kar_nama = ?`, [
+        newPassword,
+        user,
+    ]);
 
     return {
         status: 200,

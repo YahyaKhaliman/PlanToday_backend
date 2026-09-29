@@ -39,11 +39,14 @@ const getTrackingPenawaranList = async ({
 
     let havingSql = "";
     if (status === "OPEN") {
-        havingSql = "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = 0";
+        havingSql =
+            "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = 0";
     } else if (status === "PARSIAL") {
-        havingSql = "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) > 0 AND COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) < COUNT(DISTINCT d.pend_id)";
+        havingSql =
+            "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) > 0 AND COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) < COUNT(DISTINCT d.pend_id)";
     } else if (status === "CLOSE") {
-        havingSql = "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = COUNT(DISTINCT d.pend_id)";
+        havingSql =
+            "HAVING COUNT(DISTINCT CASE WHEN COALESCE(m.mspk_nomor, '') <> '' OR COALESCE(sp.spk_nomor, '') <> '' THEN d.pend_id END) = COUNT(DISTINCT d.pend_id)";
     }
 
     const ownerFilterSql = managerRole
@@ -134,8 +137,12 @@ const getTrackingPenawaranList = async ({
         baseParams,
     );
 
-    const availableSales = Array.from(new Set(filterRows.map((r) => r.sales).filter(Boolean))).sort();
-    const availableCustomers = Array.from(new Set(filterRows.map((r) => r.customer).filter(Boolean))).sort();
+    const availableSales = Array.from(
+        new Set(filterRows.map((r) => r.sales).filter(Boolean)),
+    ).sort();
+    const availableCustomers = Array.from(
+        new Set(filterRows.map((r) => r.customer).filter(Boolean)),
+    ).sort();
 
     return {
         rows: rows || [],
@@ -242,9 +249,7 @@ const getTrackingPenawaranDetailByNoPenawaran = async ({
     }));
 
     const uniqueMapNumbers = Array.from(
-        new Set(
-            rows.map((r) => String(r.no_map || "").trim()).filter(Boolean),
-        ),
+        new Set(rows.map((r) => String(r.no_map || "").trim()).filter(Boolean)),
     );
 
     const header = {
@@ -291,8 +296,7 @@ const getTrackingPenawaranDetailByNoPenawaran = async ({
                 map_divisi: firstWithReference?.map_divisi || 0,
                 map_perusahaan_kode:
                     firstWithReference?.map_perusahaan_kode || "",
-                map_customer_kode:
-                    firstWithReference?.map_customer_kode || "",
+                map_customer_kode: firstWithReference?.map_customer_kode || "",
             },
             revision: {
                 map_revisi: firstWithRevision?.map_revisi || "",
@@ -300,12 +304,9 @@ const getTrackingPenawaranDetailByNoPenawaran = async ({
             },
             audit: {
                 map_user_create: latestAuditRow?.map_user_create || "",
-                map_user_modified:
-                    latestAuditRow?.map_user_modified || "",
-                map_date_create:
-                    latestAuditRow?.map_date_create || null,
-                map_date_modified:
-                    latestAuditRow?.map_date_modified || null,
+                map_user_modified: latestAuditRow?.map_user_modified || "",
+                map_date_create: latestAuditRow?.map_date_create || null,
+                map_date_modified: latestAuditRow?.map_date_modified || null,
             },
         },
     };
@@ -372,7 +373,9 @@ const getTrackingPenawaranStatusCounts = async ({
     };
 
     for (const row of rows || []) {
-        const statusKey = String(row?.status_tracking || "").trim().toUpperCase();
+        const statusKey = String(row?.status_tracking || "")
+            .trim()
+            .toUpperCase();
         if (statusKey in statusMap) {
             statusMap[statusKey] = Number(row?.jumlah || 0);
         }

@@ -756,7 +756,9 @@ const getPenawaranList = async ({
     }
 
     let approvalFilterSql = "";
-    const normApproval = String(approvalStatus || "").trim().toUpperCase();
+    const normApproval = String(approvalStatus || "")
+        .trim()
+        .toUpperCase();
     if (normApproval === "APPROVED" || normApproval === "Y") {
         approvalFilterSql = "AND COALESCE(h.pen_digitalsign, '') = 'Y'";
     } else if (normApproval === "UNAPPROVED" || normApproval === "N") {
@@ -952,11 +954,7 @@ const getPenawaranDetail = async ({ managerRole, authSalesKode, nomor }) => {
     };
 };
 
-const createPenawaran = async ({
-    traceId,
-    body,
-    loginUser,
-}) => {
+const createPenawaran = async ({ traceId, body, loginUser }) => {
     let conn;
     let lockState = null;
 
@@ -1214,7 +1212,9 @@ const createPenawaran = async ({
         }
 
         const statusHarga = toNumber(
-            body.status_harga ?? body.statusHarga ?? (body.is_include_ppn ? 1 : 0),
+            body.status_harga ??
+                body.statusHarga ??
+                (body.is_include_ppn ? 1 : 0),
             0,
         );
 
@@ -1672,7 +1672,9 @@ const getMasterPermintaanHargaForPenawaran = async ({
                             "No. Permintaan sudah terpakai pada penawaran lain dan tidak bisa dipilih",
                     };
                 } else {
-                    const normalizedStatus = normalizePermintaanStatus(d.status);
+                    const normalizedStatus = normalizePermintaanStatus(
+                        d.status,
+                    );
                     selected = {
                         nomor: d.nomor,
                         tanggal: d.tanggal,
@@ -1714,11 +1716,7 @@ const getMasterPermintaanHargaForPenawaran = async ({
     };
 };
 
-const updatePenawaranStatusDetail = async ({
-    nomor,
-    updates,
-    user,
-}) => {
+const updatePenawaranStatusDetail = async ({ nomor, updates, user }) => {
     let conn;
 
     try {
@@ -1812,7 +1810,8 @@ const updatePenawaranStatusDetail = async ({
                     status: 400,
                     body: {
                         success: false,
-                        message: "Status BATAL wajib diisi alasannya (ket_batal)",
+                        message:
+                            "Status BATAL wajib diisi alasannya (ket_batal)",
                     },
                 };
             }
@@ -1943,7 +1942,9 @@ const updatePenawaranStatusDetail = async ({
             body: {
                 success: false,
                 message:
-                    err.sqlMessage || err.message || "Gagal mengubah status detail",
+                    err.sqlMessage ||
+                    err.message ||
+                    "Gagal mengubah status detail",
             },
         };
     } finally {
@@ -1981,11 +1982,7 @@ const getMasterPenawaranConfirm = async () => {
     return rows || [];
 };
 
-const requestApprovalPerubahan = async ({
-    nomor,
-    alasan,
-    user,
-}) => {
+const requestApprovalPerubahan = async ({ nomor, alasan, user }) => {
     let conn;
 
     try {
@@ -2038,7 +2035,8 @@ const requestApprovalPerubahan = async ({
                 status: 409,
                 body: {
                     success: false,
-                    message: "Pengajuan perubahan untuk penawaran ini sudah ada",
+                    message:
+                        "Pengajuan perubahan untuk penawaran ini sudah ada",
                 },
             };
         }
@@ -2108,10 +2106,7 @@ const requestApprovalPerubahan = async ({
     }
 };
 
-const getPenawaranActivityLogs = async ({
-    nomor,
-    user,
-}) => {
+const getPenawaranActivityLogs = async ({ nomor, user }) => {
     const ownership = await assertPenawaranOwnership({
         conn: db,
         nomor,

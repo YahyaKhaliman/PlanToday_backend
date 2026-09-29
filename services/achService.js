@@ -267,7 +267,14 @@ const getOmsetByYear = async ({ kode }) => {
     };
 };
 
-const getAchievementOmset = async ({ tahun, bulan, nik, jabatan, search, limit }) => {
+const getAchievementOmset = async ({
+    tahun,
+    bulan,
+    nik,
+    jabatan,
+    search,
+    limit,
+}) => {
     let sql = `
     SELECT
         kpi,

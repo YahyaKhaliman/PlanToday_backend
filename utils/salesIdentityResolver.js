@@ -196,11 +196,10 @@ const resolveSalesIdentity = async ({
     return null;
 };
 
-
 const getFirstActiveSales = async () => {
     try {
         const [rows] = await dbPenawaran.query(
-            `SELECT sal_kode AS sales_kode, sal_nama AS sales_nama FROM tsales WHERE COALESCE(sal_aktif, 'Y') <> 'N' ORDER BY sal_kode ASC LIMIT 1`
+            `SELECT sal_kode AS sales_kode, sal_nama AS sales_nama FROM tsales WHERE COALESCE(sal_aktif, 'Y') <> 'N' ORDER BY sal_kode ASC LIMIT 1`,
         );
         return rows?.[0] || null;
     } catch (err) {

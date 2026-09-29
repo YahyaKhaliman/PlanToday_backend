@@ -13,7 +13,8 @@ const getTrackingMapList = async ({
     const params = [startDate, endDate];
     let ownerFilterSql = "";
     if (!managerRole) {
-        ownerFilterSql = "AND COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '') = ?";
+        ownerFilterSql =
+            "AND COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '') = ?";
         params.push(authSalesKode);
     }
 
@@ -108,7 +109,8 @@ const getTrackingMapList = async ({
     const filterParams = [startDate, endDate];
     let filterOwnerSql = "";
     if (!managerRole) {
-        filterOwnerSql = "AND COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '') = ?";
+        filterOwnerSql =
+            "AND COALESCE(h.pen_sal_kode, m.mspk_sal_kode, '') = ?";
         filterParams.push(authSalesKode);
     }
 
@@ -125,7 +127,9 @@ const getTrackingMapList = async ({
         `,
         filterParams,
     );
-    const availableSales = Array.from(new Set(filterRows.map((r) => r.sales).filter(Boolean))).sort();
+    const availableSales = Array.from(
+        new Set(filterRows.map((r) => r.sales).filter(Boolean)),
+    ).sort();
 
     return {
         rows: rows || [],

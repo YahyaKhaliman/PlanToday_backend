@@ -44,7 +44,13 @@ async function findKirimanById(id) {
     return rows?.[0] || null;
 }
 
-const listPengiriman = async ({ userFilter, search, realisasiFilter, page, limit }) => {
+const listPengiriman = async ({
+    userFilter,
+    search,
+    realisasiFilter,
+    page,
+    limit,
+}) => {
     const where = ["1=1"];
     const params = [];
 
@@ -218,7 +224,15 @@ const updatePengiriman = async ({ id, payload, finalUser }) => {
     return row ? mapKirimanRow(row) : null;
 };
 
-const updateStatus = async ({ id, realisasi, tanggal, jam, latitude, longitude, catatan }) => {
+const updateStatus = async ({
+    id,
+    realisasi,
+    tanggal,
+    jam,
+    latitude,
+    longitude,
+    catatan,
+}) => {
     if (realisasi === "Y") {
         await db.query(
             `UPDATE marketing.tkiriman
@@ -229,15 +243,7 @@ const updateStatus = async ({ id, realisasi, tanggal, jam, latitude, longitude, 
                  longitude = IFNULL(?, longitude),
                  catatan = COALESCE(?, catatan)
              WHERE id = ?`,
-            [
-                realisasi,
-                tanggal || null,
-                jam,
-                latitude,
-                longitude,
-                catatan,
-                id,
-            ],
+            [realisasi, tanggal || null, jam, latitude, longitude, catatan, id],
         );
     } else {
         await db.query(
