@@ -231,18 +231,22 @@ const createPermintaanHargaInTransaction = async ({
 }) => {
     const divisiNum = toNumber(payload.mh_divisi, 0);
     const hargaKalkulasi = toNumber(payload.mh_harga_kalkulasi, 0);
-    const hargaPengajuan = toNumber(payload.mh_harga, 0);
-    let initialStatus = "MINTA";
+    let hargaPengajuan = toNumber(payload.mh_harga, 0);
+    let initialStatus = "BELUM";
+
     if (payload.mh_status) {
         initialStatus = String(payload.mh_status).trim().toUpperCase();
     } else if (hargaKalkulasi > 0) {
-        if (hargaPengajuan > 0 && hargaPengajuan >= hargaKalkulasi) {
+        if (hargaPengajuan === 0 || hargaPengajuan >= hargaKalkulasi) {
             initialStatus = "DONE";
+            if (hargaPengajuan === 0) {
+                hargaPengajuan = hargaKalkulasi;
+            }
         } else {
             initialStatus = "NEGO";
         }
     } else {
-        initialStatus = "MINTA";
+        initialStatus = "BELUM";
     }
 
     let salesKode = String(
@@ -1147,17 +1151,17 @@ const createPermintaanHargaInTransaction = async ({
         else workshopGarmen = "P01";
     }
 
-    // Pada tmintaharga.mh_harga_kalkulasi ambil dari kal_rpsales, jika kal_ppn > 0 kalikan dulu sebelum masuk ke mh_harga_kalkulasi
+    // Pada tmintaharga, mh_harga_kalkulasi dan mh_nomor_kalkulasi hanya diisi jika status DONE
     let calculatedMhHargaKalkulasi = 0;
-    if (hargaKalkulasi > 0 || kalRpSales > 0) {
+    if (initialStatus === "DONE" && (hargaKalkulasi > 0 || kalRpSales > 0)) {
         calculatedMhHargaKalkulasi =
             kalPpn > 0
                 ? Math.round(kalRpSales * (1 + kalPpn / 100))
                 : kalRpSales;
     }
     const mhHargaKalkulasi = calculatedMhHargaKalkulasi;
-    const mhNomorKalkulasi = nomorKalkulasi || null;
-    const mhDateKalkulasi = dateKalkulasi || null;
+    const mhNomorKalkulasi = initialStatus === "DONE" ? (nomorKalkulasi || null) : null;
+    const mhDateKalkulasi = initialStatus === "DONE" ? (dateKalkulasi || null) : null;
 
     // Coba insert dengan kolom mh_workshop, fallback jika kolom belum ada di DB (ER_BAD_FIELD_ERROR)
     try {
@@ -1418,38 +1422,115 @@ const getPermintaanHargaDetail = async ({
     row.kal_rpsesuai = 0;
     row.kal_rpsesuaippn = 0;
 
-    if (row.mh_nomor_kalkulasi) {
+    row.kalkulasi_detail = null;
+
+    let kalNomor = row.mh_nomor_kalkulasi;
+    let hdr = null;
+
+    if (kalNomor) {
         try {
             const [hdrRows] = await db.query(
-                `SELECT kal_ppn, kal_rpsesuai, kal_rpsesuaippn, 
-                        COALESCE(kal_rpsales, 0) AS kal_rpsales 
-                 FROM kalkulasi.tkalkulasi_hdr 
-                 WHERE kal_nomor = ? LIMIT 1`,
-                [row.mh_nomor_kalkulasi],
+                `SELECT * FROM kalkulasi.tkalkulasi_hdr WHERE kal_nomor = ? LIMIT 1`,
+                [kalNomor],
+            );
+            if (hdrRows?.[0]) hdr = hdrRows[0];
+        } catch (hdrErr) {}
+    }
+
+    if (!hdr && row.mh_nomor) {
+        try {
+            const [hdrRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_hdr WHERE kal_mh_nomor = ? ORDER BY kal_nomor DESC LIMIT 1`,
+                [row.mh_nomor],
             );
             if (hdrRows?.[0]) {
-                row.kal_ppn = Number(hdrRows[0].kal_ppn) || 0;
-                row.kal_rpsesuai = Number(hdrRows[0].kal_rpsesuai) || 0;
-                row.kal_rpsesuaippn = Number(hdrRows[0].kal_rpsesuaippn) || 0;
-                row.kal_rpsales = Number(hdrRows[0].kal_rpsales) || 0;
-            }
-        } catch (hdrErr) {
-            try {
-                const [hdrFallback] = await db.query(
-                    `SELECT kal_ppn, kal_rpsesuai, kal_rpsesuaippn 
-                     FROM kalkulasi.tkalkulasi_hdr 
-                     WHERE kal_nomor = ? LIMIT 1`,
-                    [row.mh_nomor_kalkulasi],
-                );
-                if (hdrFallback?.[0]) {
-                    row.kal_ppn = Number(hdrFallback[0].kal_ppn) || 0;
-                    row.kal_rpsesuai = Number(hdrFallback[0].kal_rpsesuai) || 0;
-                    row.kal_rpsesuaippn =
-                        Number(hdrFallback[0].kal_rpsesuaippn) || 0;
-                    row.kal_rpsales = 0;
+                hdr = hdrRows[0];
+                kalNomor = hdr.kal_nomor;
+                if (!row.mh_nomor_kalkulasi) {
+                    row.mh_nomor_kalkulasi = kalNomor;
                 }
-            } catch (fbErr) {}
-        }
+            }
+        } catch (hdrErr2) {}
+    }
+
+    if (hdr && kalNomor) {
+        row.kal_ppn = Number(hdr.kal_ppn) || 0;
+        row.kal_rpsesuai = Number(hdr.kal_rpsesuai) || 0;
+        row.kal_rpsesuaippn = Number(hdr.kal_rpsesuaippn) || 0;
+        row.kal_rpsales = Number(hdr.kal_rpsales) || 0;
+
+        let dtl = null;
+        let komponenRows = [];
+        let aksesoriesRows = [];
+        let cetak = null;
+        let sublim = null;
+        let dtf = null;
+        let bordir = null;
+        let polyflex = null;
+
+        try {
+            const [dtlRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_dtl WHERE kald_nomor = ? LIMIT 1`,
+                [kalNomor],
+            );
+            dtl = dtlRows?.[0] || null;
+        } catch (e) {}
+
+        try {
+            const [kRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_komponen WHERE kk_nomor = ? ORDER BY kk_nourut ASC`,
+                [kalNomor],
+            );
+            komponenRows = kRows || [];
+        } catch (e) {}
+
+        try {
+            const [aRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_aksesories WHERE ka_nomor = ? ORDER BY ka_nourut ASC`,
+                [kalNomor],
+            );
+            aksesoriesRows = aRows || [];
+        } catch (e) {}
+
+        try {
+            const [cRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_cetak WHERE kald_nomor = ? LIMIT 1`,
+                [kalNomor],
+            );
+            cetak = cRows?.[0] || null;
+        } catch (e) {}
+
+        try {
+            const [sRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_sublim WHERE kald_nomor = ? LIMIT 1`,
+                [kalNomor],
+            );
+            sublim = sRows?.[0] || null;
+        } catch (e) {}
+
+        try {
+            const [dRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_dtf WHERE kald_nomor = ? LIMIT 1`,
+                [kalNomor],
+            );
+            dtf = dRows?.[0] || null;
+        } catch (e) {}
+
+        try {
+            const [bRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_bordir WHERE kald_nomor = ? LIMIT 1`,
+                [kalNomor],
+            );
+            bordir = bRows?.[0] || null;
+        } catch (e) {}
+
+        try {
+            const [pRows] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_polyflex WHERE kald_nomor = ? LIMIT 1`,
+                [kalNomor],
+            );
+            polyflex = pRows?.[0] || null;
+        } catch (e) {}
 
         if (row.kal_rpsales > 0) {
             const calcWithPpn =
@@ -1461,21 +1542,108 @@ const getPermintaanHargaDetail = async ({
             }
         }
 
-        try {
-            const [dtlRows] = await db.query(
-                `SELECT kald_rpkirim FROM kalkulasi.tkalkulasi_dtl WHERE kald_nomor = ? LIMIT 1`,
-                [row.mh_nomor_kalkulasi],
-            );
-            if (
-                dtlRows?.[0]?.kald_rpkirim !== undefined &&
-                dtlRows?.[0]?.kald_rpkirim !== null
-            ) {
-                const perPcs = Number(dtlRows[0].kald_rpkirim) || 0;
-                const qty = Math.max(1, Number(row.mh_jmlorder || 1));
-                row.kald_rpkirim = perPcs;
-                row.mh_ongkir = Math.round(perPcs * qty);
-            }
-        } catch (e) {}
+        if (dtl?.kald_rpkirim !== undefined && dtl?.kald_rpkirim !== null) {
+            const perPcs = Number(dtl.kald_rpkirim) || 0;
+            const qty = Math.max(1, Number(row.mh_jmlorder || 1));
+            row.kald_rpkirim = perPcs;
+            row.mh_ongkir = Math.round(perPcs * qty);
+        }
+
+        row.kalkulasi_detail = {
+            hdr: {
+                kal_nomor: hdr.kal_nomor,
+                kal_mh_nomor: hdr.kal_mh_nomor,
+                kal_project: hdr.kal_project,
+                kal_tanggal: hdr.kal_tanggal,
+                kal_cus: hdr.kal_cus,
+                kal_kh_kode: hdr.kal_kh_kode,
+                kal_order: hdr.kal_order,
+                kal_rencanaorder: Number(hdr.kal_rencanaorder) || 0,
+                kal_rpallowance: Number(hdr.kal_rpallowance) || 0,
+                kal_allowance: Number(hdr.kal_allowance) || 0,
+                kal_rplaba: Number(hdr.kal_rplaba) || 0,
+                kal_laba: Number(hdr.kal_laba) || 0,
+                kal_persen: hdr.kal_persen,
+                kal_pakaiobat: hdr.kal_pakaiobat,
+                kal_ppn: Number(hdr.kal_ppn) || 0,
+                kal_rpsesuai: Number(hdr.kal_rpsesuai) || 0,
+                kal_rpsesuaippn: Number(hdr.kal_rpsesuaippn) || 0,
+                kal_rpsales: Number(hdr.kal_rpsales) || 0,
+                kal_ket: hdr.kal_ket,
+                kal_ketbeli: hdr.kal_ketbeli,
+                user_create: hdr.user_create,
+                date_create: hdr.date_create,
+            },
+            dtl: dtl
+                ? {
+                      kald_rpbody: Number(dtl.kald_rpbody) || 0,
+                      kald_rplengan: Number(dtl.kald_rplengan) || 0,
+                      kald_rprib: Number(dtl.kald_rprib) || 0,
+                      kald_rpkrah: Number(dtl.kald_rpkrah) || 0,
+                      kald_rpmanset: Number(dtl.kald_rpmanset) || 0,
+                      kald_rppotong: Number(dtl.kald_rppotong) || 0,
+                      kald_rpjahit: Number(dtl.kald_rpjahit) || 0,
+                      kald_rpraglan: Number(dtl.kald_rpraglan) || 0,
+                      kald_rpfinishing: Number(dtl.kald_rpfinishing) || 0,
+                      kald_rptenagacetak: Number(dtl.kald_rptenagacetak) || 0,
+                      kald_rpbiayaobat: Number(dtl.kald_rpbiayaobat) || 0,
+                      kald_rpkirim: Number(dtl.kald_rpkirim) || 0,
+                      kald_jahit: dtl.kald_jahit || "",
+                      kald_body: dtl.kald_body || "",
+                      kald_lengan: dtl.kald_lengan || "",
+                      kald_rib: dtl.kald_rib || "",
+                      kald_krah: dtl.kald_krah || "",
+                      kald_manset: dtl.kald_manset || "",
+                      kald_babaranbody: Number(dtl.kald_babaranbody) || 0,
+                      kald_babaranlengan: Number(dtl.kald_babaranlengan) || 0,
+                  }
+                : null,
+            komponen: (komponenRows || []).map((k) => ({
+                kk_komponen: k.kk_komponen,
+                kk_jeniskain: k.kk_jeniskain,
+                kk_warna: k.kk_warna,
+                kk_harga: Number(k.kk_harga) || 0,
+                kk_babaran: Number(k.kk_babaran) || 0,
+                kk_pcs: Number(k.kk_pcs) || 0,
+                kk_kg: k.kk_kg,
+                kk_pabrik: k.kk_pabrik,
+                kk_nourut: Number(k.kk_nourut) || 0,
+            })),
+            aksesories: (aksesoriesRows || []).map((a) => ({
+                ka_aksesories: a.ka_aksesories,
+                ka_biaya: Number(a.ka_biaya) || 0,
+                ka_nourut: Number(a.ka_nourut) || 0,
+            })),
+            cetak: cetak
+                ? {
+                      kald_rpcetak: Number(cetak.kald_rpcetak) || 0,
+                  }
+                : null,
+            sublim: sublim
+                ? {
+                      kald_rpsublim: Number(sublim.kald_rpsublim) || 0,
+                      kald_cmsublim: Number(sublim.kald_cmsublim) || 0,
+                  }
+                : null,
+            dtf: dtf
+                ? {
+                      kald_rpdtf: Number(dtf.kald_rpdtf) || 0,
+                      kald_cmdtf: Number(dtf.kald_cmdtf) || 0,
+                  }
+                : null,
+            bordir: bordir
+                ? {
+                      kald_rpbordir: Number(bordir.kald_rpbordir) || 0,
+                      kald_cmbordir: Number(bordir.kald_cmbordir) || 0,
+                  }
+                : null,
+            polyflex: polyflex
+                ? {
+                      kald_rppolyflex: Number(polyflex.kald_rppolyflex) || 0,
+                      kald_cmpolyflex: Number(polyflex.kald_cmpolyflex) || 0,
+                  }
+                : null,
+        };
     }
     const baseUrl = buildImageBaseUrl();
     const imagePaths = buildImagePaths(row.mh_nomor);
