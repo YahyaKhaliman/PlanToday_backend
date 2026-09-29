@@ -2881,7 +2881,7 @@ const getKalkulasiOptions = async () => {
             mhmt_material AS material, 
             mhmt_harga AS harga 
          FROM tmintaharga_mmt_tambahan 
-         WHERE mhmt_aktif = 1 
+         WHERE mhmt_aktif = 1 AND mhmt_kategori != 'SELONGSONG'
          ORDER BY mhmt_id`,
     );
 
@@ -3221,14 +3221,44 @@ const calculateMmt = async ({
         }
     }
 
-    // Biaya Finishing Selongsong (Opsional)
+    // Biaya Finishing Selongsong (Dinamis dari master data tmintaharga_mmt_tambahan)
     const isSelongsongVert = Boolean(selongsongVertical);
     const isSelongsongHoriz = Boolean(selongsongHorizontal);
+    let faktorSelongsongVert = 0;
+    let faktorSelongsongHoriz = 0;
+
+    if (isSelongsongVert || isSelongsongHoriz) {
+        try {
+            const [selRows] = await db.query(
+                `SELECT mhmt_kode, mhmt_ukuran, mhmt_harga 
+                 FROM tmintaharga_mmt_tambahan 
+                 WHERE mhmt_kategori = 'SELONGSONG' AND mhmt_aktif = 1`,
+            );
+            if (selRows && selRows.length > 0) {
+                const rowVert = selRows.find(
+                    (r) =>
+                        r.mhmt_kode === "SELONGSONG_MMT_V" ||
+                        String(r.mhmt_ukuran || "").toUpperCase().includes("VERTIKAL"),
+                );
+                const rowHoriz = selRows.find(
+                    (r) =>
+                        r.mhmt_kode === "SELONGSONG_MMT_H" ||
+                        String(r.mhmt_ukuran || "").toUpperCase().includes("HORIZONTAL"),
+                );
+
+                if (rowVert) faktorSelongsongVert = Number(rowVert.mhmt_harga) || 0;
+                if (rowHoriz) faktorSelongsongHoriz = Number(rowHoriz.mhmt_harga) || 0;
+            }
+        } catch (selErr) {
+            console.warn("[calculateMmt][LookupSelongsongWarn]", selErr.message);
+        }
+    }
+
     const biayaSelongsongVertPerPcs = isSelongsongVert
-        ? Math.round(0.2 * numPanjang * tarifPerM2)
+        ? Math.round(faktorSelongsongVert * numPanjang * tarifPerM2)
         : 0;
     const biayaSelongsongHorizPerPcs = isSelongsongHoriz
-        ? Math.round(0.2 * numLebar * tarifPerM2)
+        ? Math.round(faktorSelongsongHoriz * numLebar * tarifPerM2)
         : 0;
     const totalSelongsongPerPcs =
         biayaSelongsongVertPerPcs + biayaSelongsongHorizPerPcs;
