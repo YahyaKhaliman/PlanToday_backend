@@ -85,6 +85,14 @@ router.get("/jenis-kain-minta-harga", auth, controller.getJenisKainMintaHarga);
 router.get("/tambahan", auth, controller.getTambahanOptions);
 router.get("/cetak", auth, controller.getCetakOptions);
 
+// --- PRA ORDER LOOKUP & DETAIL FOR AUTOFILL ---
+router.get("/permintaan-harga/pra-order", auth, controller.getPraOrderList);
+router.get(
+    "/permintaan-harga/pra-order/:nomor",
+    auth,
+    controller.getPraOrderDetail,
+);
+
 router.get(
     "/permintaan-harga/:nomor",
     auth,

@@ -467,6 +467,46 @@ const getCustomerSoHistory = async (req, res) => {
     }
 };
 
+const getPraOrderList = async (req, res) => {
+    try {
+        const { q = "", keyword = "", page = 1, limit = 20 } = req.query;
+        const searchWord = q || keyword || "";
+        const result = await permintaanHargaService.searchPraOrder({
+            keyword: searchWord,
+            page,
+            limit,
+        });
+        return res.json({
+            success: true,
+            data: result.data,
+            pagination: result.pagination,
+        });
+    } catch (err) {
+        console.error("[PermintaanHarga][PraOrderList][Error]", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message || "Gagal mengambil daftar Pra Order",
+        });
+    }
+};
+
+const getPraOrderDetail = async (req, res) => {
+    try {
+        const { nomor } = req.params;
+        const data = await permintaanHargaService.getPraOrderDetail(nomor);
+        return res.json({
+            success: true,
+            data,
+        });
+    } catch (err) {
+        console.error("[PermintaanHarga][PraOrderDetail][Error]", err);
+        return res.status(404).json({
+            success: false,
+            message: err.message || "Data Pra Order tidak ditemukan",
+        });
+    }
+};
+
 module.exports = {
     getKalkulasiOptions,
     getOngkirOptions,
@@ -479,6 +519,8 @@ module.exports = {
     getTambahanOptions,
     getCetakOptions,
     getCustomerSoHistory,
+    getPraOrderList,
+    getPraOrderDetail,
     getPermintaanHargaList,
     getPermintaanHargaDetail,
     createPermintaanHarga,

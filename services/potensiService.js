@@ -298,7 +298,7 @@ const createBatch = async ({
                     pot_alasan_batal,
                     user_create,
                     date_create
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NOW())
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', NULL, ?, NOW())
                 `,
                 [
                     potNomor,
@@ -382,8 +382,10 @@ const getList = async ({
     const normalizedStatus = String(statusFilter || "ALL")
         .trim()
         .toUpperCase();
-    if (normalizedStatus === "POTENSI") {
-        whereClauses.push("p.pot_status IS NULL");
+    if (normalizedStatus === "POTENSI" || normalizedStatus === "OPEN") {
+        whereClauses.push(
+            "(p.pot_status IS NULL OR p.pot_status NOT IN ('CLOSE', 'BATAL'))",
+        );
     } else if (normalizedStatus === "CLOSE") {
         whereClauses.push("p.pot_status = 'CLOSE'");
     } else if (normalizedStatus === "BATAL") {
@@ -432,8 +434,16 @@ const getList = async ({
                 p.pot_harga,
                 0
             ) AS harga,
-            COALESCE(p.pot_status, 'POTENSI') AS pot_status,
-            COALESCE(p.pot_status, 'POTENSI') AS status,
+            CASE 
+                WHEN p.pot_status = 'CLOSE' THEN 'CLOSE'
+                WHEN p.pot_status = 'BATAL' THEN 'BATAL'
+                ELSE 'POTENSI'
+            END AS pot_status,
+            CASE 
+                WHEN p.pot_status = 'CLOSE' THEN 'CLOSE'
+                WHEN p.pot_status = 'BATAL' THEN 'BATAL'
+                ELSE 'POTENSI'
+            END AS status,
             COALESCE(p.pot_alasan_batal, '') AS pot_alasan_batal,
             COALESCE(p.pot_alasan_batal, '') AS alasan_batal,
             DATE_FORMAT(p.date_create, '%Y-%m-%d %H:%i:%s') AS pot_tanggal,
@@ -478,8 +488,25 @@ const getList = async ({
         params,
     );
 
+    let availableSales = [];
+    if (managerRole) {
+        const [salesRows] = await db.query(
+            "SELECT DISTINCT sal_nama FROM tsales WHERE sal_aktif = 'Y' AND sal_nama IS NOT NULL AND sal_nama <> '' ORDER BY sal_nama ASC",
+        );
+        availableSales = (salesRows || []).map((r) => r.sal_nama);
+    } else {
+        availableSales = Array.from(
+            new Set(
+                (listRows || [])
+                    .map((r) => r.sal_nama || r.sales_nama)
+                    .filter(Boolean),
+            ),
+        ).sort();
+    }
+
     return {
         list: listRows || [],
+        availableSales,
     };
 };
 

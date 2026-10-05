@@ -149,6 +149,9 @@ const getPotensiList = async (req, res) => {
                 startDate,
                 endDate,
                 count: (result.list || []).length,
+                filter_options: {
+                    sales: result.availableSales || [],
+                },
             },
         });
     } catch (err) {
