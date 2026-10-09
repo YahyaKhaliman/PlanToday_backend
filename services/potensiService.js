@@ -26,6 +26,7 @@ const getNextPotensiNumber = async (
         SELECT IFNULL(MAX(CAST(RIGHT(pot_nomor, 6) AS UNSIGNED)), 0) AS max_num
         FROM tpotensi
         WHERE pot_nomor LIKE ?
+        FOR UPDATE
         `,
         [`${prefix}%`],
     );
@@ -37,6 +38,9 @@ const getNextPotensiNumber = async (
 
 /**
  * Service: Mengambil daftar kandidat Penawaran & MAP yang belum masuk tpotensi
+ * Diselaraskan dengan kriteria aplikasi Proyeksi Potensi Manksi Web:
+ * - Penawaran: belum ada MAP aktif, belum selesai/close, dan belum ada di tpotensi aktif (cek pot_pend_id & nama)
+ * - MAP: aktif, belum close, belum terbit SPK aktif, belum terbit SO aktif, dan belum ada di tpotensi aktif
  */
 const getKandidatList = async ({
     managerRole,
@@ -105,6 +109,14 @@ const getKandidatList = async ({
         );
     }
 
+    // Subquery untuk eliminasi penawaran yang seluruh detailnya sudah BATAL atau CLOSE (selaras Manksi Web)
+    const selesaiPenawaranSubQuery = `
+        SELECT pend_pen_nomor AS pen_nomor
+        FROM tpenawaran_dtl
+        GROUP BY pend_pen_nomor
+        HAVING SUM(CASE WHEN pend_status NOT IN ('BATAL', 'CLOSE') THEN 1 ELSE 0 END) = 0
+    `;
+
     const penawaranSubQuery = `
         SELECT 
             'PENAWARAN' AS tipe_sumber,
@@ -132,16 +144,27 @@ const getKandidatList = async ({
             ON s.sal_kode = h.pen_sal_kode
         LEFT JOIN tcustomer c 
             ON c.cus_kode = h.pen_cus_kode
-        LEFT JOIN tmemospk m 
-            ON m.mspk_pen_nomor = h.pen_nomor 
-           AND m.mspk_pen_id = d.pend_id
-        LEFT JOIN tpotensi p 
-            ON p.pot_pen_nomor = h.pen_nomor 
-           AND p.pot_nama_item = d.pend_nama_barang
-        WHERE m.mspk_nomor IS NULL 
-          AND p.pot_nomor IS NULL
+        LEFT JOIN (${selesaiPenawaranSubQuery}) sel 
+            ON sel.pen_nomor = h.pen_nomor
+        WHERE sel.pen_nomor IS NULL
+          AND COALESCE(d.pend_nama_barang, '') <> ''
           AND COALESCE(h.pen_status, '') <> 'BATAL'
           AND COALESCE(d.pend_batal, '') <> 'Y'
+          AND NOT EXISTS (
+            SELECT 1 FROM tmemospk m 
+            WHERE m.mspk_pen_nomor = h.pen_nomor 
+              AND m.mspk_pen_id = d.pend_id
+              AND m.mspk_aktif = 'Y'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM tpotensi p 
+            WHERE p.pot_pen_nomor = h.pen_nomor 
+              AND (
+                (p.pot_pend_id IS NOT NULL AND p.pot_pend_id = d.pend_id)
+                OR (p.pot_pend_id IS NULL AND TRIM(p.pot_nama_item) = TRIM(d.pend_nama_barang))
+              )
+              AND p.pot_status <> 'BATAL'
+          )
           ${penSalesSql}
           ${penSearchSql}
     `;
@@ -165,7 +188,7 @@ const getKandidatList = async ({
             COALESCE(m.mspk_cus_kode, h.pen_cus_kode, '') AS customer_kode,
             COALESCE(c.cus_nama, '') AS customer_nama,
             COALESCE(m.mspk_perush_kode, h.pen_perush_kode, 'KP') AS perush_kode,
-            'LL' AS jo_kode
+            COALESCE(m.mspk_jo_kode, 'LL') AS jo_kode
         FROM tmemospk m
         LEFT JOIN tpenawaran_hdr h 
             ON h.pen_nomor = m.mspk_pen_nomor
@@ -176,18 +199,21 @@ const getKandidatList = async ({
             ON s.sal_kode = COALESCE(m.mspk_sal_kode, h.pen_sal_kode, '')
         LEFT JOIN tcustomer c 
             ON c.cus_kode = COALESCE(m.mspk_cus_kode, h.pen_cus_kode, '')
-        LEFT JOIN tsalesorder so 
-            ON so.so_memo = m.mspk_nomor 
-           AND so.so_aktif = 'Y'
-        LEFT JOIN tpotensi p_map 
-            ON p_map.pot_mspk_nomor = m.mspk_nomor
-        LEFT JOIN tpotensi p_pen 
-                ON p_pen.pot_pen_nomor = m.mspk_pen_nomor 
-           AND p_pen.pot_nama_item = m.mspk_nama
-        WHERE so.so_nomor IS NULL 
-          AND p_map.pot_nomor IS NULL 
-          AND p_pen.pot_nomor IS NULL
-          AND COALESCE(m.mspk_close, '') <> 'Y'
+        WHERE m.mspk_aktif = 'Y' 
+          AND (m.mspk_close = 0 OR m.mspk_close = '0' OR m.mspk_close = 'N' OR m.mspk_close IS NULL)
+          AND NOT EXISTS (
+            SELECT 1 FROM tspk sp 
+            WHERE sp.spk_memo = m.mspk_nomor AND sp.spk_aktif = 'Y'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM tsalesorder so 
+            WHERE so.so_memo = m.mspk_nomor AND so.so_aktif = 'Y'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM tpotensi p_map 
+            WHERE p_map.pot_mspk_nomor = m.mspk_nomor 
+              AND p_map.pot_status <> 'BATAL'
+          )
           ${mapSalesSql}
           ${mapSearchSql}
     `;
@@ -222,6 +248,7 @@ const getKandidatList = async ({
 
 /**
  * Service: Menyimpan batch item ke tpotensi
+ * Menyimpan pot_pend_id agar dedupe key unik database aktif dan selaras dengan Manksi Web
  */
 const createBatch = async ({
     items = [],
@@ -244,6 +271,22 @@ const createBatch = async ({
             const namaItem = String(
                 item.nama_item || item.pot_nama_item || "",
             ).trim();
+
+            const rawPendId =
+                item.pend_id !== undefined
+                    ? item.pend_id
+                    : (item.item_id !== undefined
+                          ? item.item_id
+                          : (item.pot_pend_id !== undefined
+                                ? item.pot_pend_id
+                                : null));
+            const pendId =
+                rawPendId !== null &&
+                rawPendId !== "" &&
+                !isNaN(Number(rawPendId))
+                    ? Number(rawPendId)
+                    : null;
+
             const harga = toNumber(
                 item.harga !== undefined ? item.harga : item.pot_harga,
                 0,
@@ -254,27 +297,72 @@ const createBatch = async ({
             const salKode = String(
                 item.sales_kode || item.pot_sal_kode || authSalesKode || "",
             ).trim();
-            const perushKode = String(
-                item.perush_kode || item.pot_perush_kode || "KP",
+            let perushKode = String(
+                item.perush_kode || item.pot_perush_kode || "",
             ).trim();
-            const joKode = String(
-                item.jo_kode || item.pot_jo_kode || "LL",
+            let joKode = String(
+                item.jo_kode || item.pot_jo_kode || "",
             ).trim();
 
-            if (!namaItem) continue;
+            if (!namaItem && !penNomor && !mspkNomor) continue;
+            const namaItemFinal = namaItem || penNomor || mspkNomor;
 
-            // Cek pencegahan duplikasi di database
-            const [existRows] = await conn.query(
-                `
-                SELECT pot_nomor FROM tpotensi 
-                WHERE (pot_mspk_nomor IS NOT NULL AND pot_mspk_nomor = ?)
-                   OR (pot_pen_nomor IS NOT NULL AND pot_pen_nomor = ? AND pot_nama_item = ?)
-                LIMIT 1
-                `,
-                [mspkNomor, penNomor, namaItem],
-            );
+            // Jika perushKode atau joKode kosong, ambil dari data sumber
+            if (mspkNomor) {
+                const [mRows] = await conn.query(
+                    `SELECT mspk_perush_kode, mspk_jo_kode, mspk_sal_kode, mspk_cus_kode FROM tmemospk WHERE mspk_nomor = ? LIMIT 1`,
+                    [mspkNomor],
+                );
+                if (mRows && mRows.length > 0) {
+                    perushKode = perushKode || mRows[0].mspk_perush_kode || "KP";
+                    joKode = joKode || mRows[0].mspk_jo_kode || "LL";
+                }
+            } else if (penNomor) {
+                const [hRows] = await conn.query(
+                    `SELECT pen_perush_kode, pen_sal_kode, pen_cus_kode FROM tpenawaran_hdr WHERE pen_nomor = ? LIMIT 1`,
+                    [penNomor],
+                );
+                if (hRows && hRows.length > 0) {
+                    perushKode = perushKode || hRows[0].pen_perush_kode || "KP";
+                    joKode = joKode || "LL";
+                }
+            }
+
+            perushKode = perushKode || "KP";
+            joKode = joKode || "LL";
+
+            // Cek pencegahan duplikasi di database (selaras Manksi Web) dengan FOR UPDATE
+            let existRows = [];
+            if (mspkNomor) {
+                const [dup] = await conn.query(
+                    `
+                    SELECT pot_nomor FROM tpotensi 
+                    WHERE pot_mspk_nomor = ? 
+                      AND pot_status <> 'BATAL' 
+                    LIMIT 1 FOR UPDATE
+                    `,
+                    [mspkNomor],
+                );
+                existRows = dup;
+            } else if (penNomor) {
+                const [dup] = await conn.query(
+                    `
+                    SELECT pot_nomor FROM tpotensi 
+                    WHERE pot_pen_nomor = ? 
+                      AND (
+                        (? IS NOT NULL AND pot_pend_id = ?)
+                        OR (? IS NULL AND TRIM(pot_nama_item) = TRIM(?))
+                      )
+                      AND pot_status <> 'BATAL' 
+                    LIMIT 1 FOR UPDATE
+                    `,
+                    [penNomor, pendId, pendId, pendId, namaItemFinal],
+                );
+                existRows = dup;
+            }
 
             if (existRows && existRows.length > 0) {
+                // Item sudah ada di potensi aktif, lewati agar tidak dobel
                 continue;
             }
 
@@ -284,39 +372,49 @@ const createBatch = async ({
                 joKode,
             );
 
-            await conn.query(
-                `
-                INSERT INTO tpotensi (
-                    pot_nomor,
-                    pot_sal_kode,
-                    pot_cus_kode,
-                    pot_pen_nomor,
-                    pot_mspk_nomor,
-                    pot_nama_item,
-                    pot_harga,
-                    pot_status,
-                    pot_alasan_batal,
-                    user_create,
-                    date_create
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', NULL, ?, NOW())
-                `,
-                [
-                    potNomor,
-                    salKode,
-                    cusKode,
-                    penNomor,
-                    mspkNomor,
-                    namaItem,
-                    harga,
-                    username,
-                ],
-            );
+            try {
+                await conn.query(
+                    `
+                    INSERT INTO tpotensi (
+                        pot_nomor,
+                        pot_sal_kode,
+                        pot_cus_kode,
+                        pot_pen_nomor,
+                        pot_pend_id,
+                        pot_mspk_nomor,
+                        pot_nama_item,
+                        pot_harga,
+                        pot_status,
+                        pot_alasan_batal,
+                        user_create,
+                        date_create
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', NULL, ?, NOW())
+                    `,
+                    [
+                        potNomor,
+                        salKode,
+                        cusKode,
+                        penNomor,
+                        pendId,
+                        mspkNomor,
+                        namaItemFinal,
+                        harga,
+                        username,
+                    ],
+                );
 
-            createdList.push({
-                pot_nomor: potNomor,
-                nama_item: namaItem,
-                harga: harga,
-            });
+                createdList.push({
+                    pot_nomor: potNomor,
+                    nama_item: namaItemFinal,
+                    harga: harga,
+                });
+            } catch (insertErr) {
+                // Tangani bentrok duplikat dari UNIQUE KEY database jika ada request bersamaan
+                if (insertErr.code === "ER_DUP_ENTRY") {
+                    continue;
+                }
+                throw insertErr;
+            }
         }
 
         await conn.commit();
@@ -411,6 +509,22 @@ const getList = async ({
             p.pot_pen_nomor AS pen_nomor,
             COALESCE(p.pot_mspk_nomor, MAX(m.mspk_nomor), '') AS mspk_nomor,
             COALESCE(p.pot_mspk_nomor, MAX(m.mspk_nomor), '') AS pot_mspk_nomor,
+            IF(p.pot_pen_nomor IS NOT NULL AND p.pot_pen_nomor <> '', 'PENAWARAN', 'MAP') AS tipe_sumber,
+            COALESCE(p.pot_pen_nomor, p.pot_mspk_nomor, MAX(m.mspk_nomor), '') AS nomor_sumber,
+            (
+                IF(
+                    p.pot_pen_nomor IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM tspk s WHERE s.spk_pen_nomor = p.pot_pen_nomor AND s.spk_aktif = 'Y'
+                        UNION SELECT 1 FROM tsalesorder so WHERE so.so_pen_nomor = p.pot_pen_nomor AND so.so_aktif = 'Y'
+                    ), 1,
+                    IF(
+                        p.pot_mspk_nomor IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM tspk s WHERE s.spk_memo = p.pot_mspk_nomor AND s.spk_aktif = 'Y'
+                            UNION SELECT 1 FROM tsalesorder so WHERE so.so_memo = p.pot_mspk_nomor AND so.so_aktif = 'Y'
+                        ), 1, 0
+                    )
+                )
+            ) AS is_realisasi,
             COALESCE(
                 NULLIF(MAX(m.mspk_nama), ''),
                 NULLIF(MAX(d.pend_nama_barang), ''),
@@ -464,7 +578,10 @@ const getList = async ({
             ON h.pen_nomor = COALESCE(p.pot_pen_nomor, m.mspk_pen_nomor)
         LEFT JOIN tpenawaran_dtl d 
             ON d.pend_pen_nomor = h.pen_nomor 
-           AND (d.pend_id = m.mspk_pen_id OR d.pend_nama_barang = p.pot_nama_item)
+           AND (
+               (p.pot_pend_id IS NOT NULL AND d.pend_id = p.pot_pend_id)
+               OR (p.pot_pend_id IS NULL AND (d.pend_id = m.mspk_pen_id OR TRIM(d.pend_nama_barang) = TRIM(p.pot_nama_item)))
+           )
         LEFT JOIN tcustomer c 
             ON c.cus_kode = COALESCE(p.pot_cus_kode, m.mspk_cus_kode, h.pen_cus_kode)
         LEFT JOIN tsales s 
