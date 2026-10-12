@@ -1,4 +1,17 @@
 const db = require("../config/dbMain");
+const {
+    canonicalSalesName,
+    salesAliasMembers,
+} = require("../utils/salesIdentityResolver");
+
+// Bangun klausa IN untuk mencocokkan user/karyawan ke semua alias nama sales.
+const salesNameInClause = (user, col) => {
+    const members = salesAliasMembers(user);
+    return {
+        sql: `UPPER(TRIM(${col})) IN (${members.map(() => "?").join(",")})`,
+        params: members,
+    };
+};
 
 function safe(v, fallback = "-") {
     if (v === null || v === undefined) return fallback;
@@ -771,6 +784,7 @@ const uploadVisitPhoto = async ({ id, file }) => {
 };
 
 const getRekapVisit = async ({ user, start, end, cabang, publicBaseUrl }) => {
+    const userFilter = salesNameInClause(user, "a.user");
     let sql = `
         SELECT
         a.id,
@@ -793,13 +807,13 @@ const getRekapVisit = async ({ user, start, end, cabang, publicBaseUrl }) => {
         FROM tkunjungan a
         LEFT JOIN kencanaprint.tcustomer b ON b.cus_kode = a.cus_kode
         LEFT JOIN tkaryawan k ON k.kar_nama = a.user AND k.kar_isaktif = 1
-        WHERE a.user = ?
+        WHERE ${userFilter.sql}
         AND a.realisasi = 'Y'
         AND DATE(a.tanggal) >= ?
         AND DATE(a.tanggal) <= ?
         `;
 
-    const params = [publicBaseUrl, user, start, end];
+    const params = [publicBaseUrl, ...userFilter.params, start, end];
 
     if (cabang) {
         sql += ` AND UPPER(k.kar_cabang) = ?`;
@@ -813,6 +827,7 @@ const getRekapVisit = async ({ user, start, end, cabang, publicBaseUrl }) => {
 };
 
 const rekapVisitWA = async ({ user, start, end, cabang }) => {
+    const userFilter = salesNameInClause(user, "ku.user");
     let sql = `
     SELECT
         ku.id,
@@ -828,13 +843,13 @@ const rekapVisitWA = async ({ user, start, end, cabang }) => {
     FROM tkunjungan ku
     INNER JOIN tkaryawan ka ON ka.kar_nama = ku.user
     INNER JOIN kencanaprint.tcustomer ca ON ca.cus_kode = ku.cus_kode
-    WHERE ku.user = ?
+    WHERE ${userFilter.sql}
         AND ku.realisasi = 'Y'
         AND DATE(ku.tanggal) >= ?
         AND DATE(ku.tanggal) <= ?
     `;
 
-    const params = [user, start, end];
+    const params = [...userFilter.params, start, end];
 
     if (cabang) {
         sql += ` AND UPPER(ka.kar_cabang) = ?`;
@@ -930,6 +945,8 @@ const getRekapVisitPlan = async ({
         `;
         params = [tanggal_awal, tanggal_akhir, publicBaseUrl];
     } else {
+        const cteFilter = salesNameInClause(user, "user");
+        const outerFilter = salesNameInClause(user, "k.user");
         sql = `
         WITH pick AS (
             SELECT
@@ -937,7 +954,7 @@ const getRekapVisitPlan = async ({
                 DATE(tanggal_plan) AS tgl,
                 MAX(id) AS pick_id
             FROM tkunjungan
-            WHERE user = ?
+            WHERE ${cteFilter.sql}
                 AND DATE(tanggal_plan) BETWEEN ? AND ?
             GROUP BY cus_kode, DATE(tanggal_plan)
         )
@@ -965,9 +982,15 @@ const getRekapVisitPlan = async ({
         JOIN tkunjungan k ON k.id = p.pick_id
         LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
         INNER JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
-        WHERE k.user = ?
+        WHERE ${outerFilter.sql}
         `;
-        params = [user, tanggal_awal, tanggal_akhir, publicBaseUrl, user];
+        params = [
+            ...cteFilter.params,
+            tanggal_awal,
+            tanggal_akhir,
+            publicBaseUrl,
+            ...outerFilter.params,
+        ];
 
         if (cabang) {
             sql += ` AND ka.kar_cabang = ?`;
@@ -982,6 +1005,8 @@ const getRekapVisitPlan = async ({
 };
 
 const rekapVisitPlanWA = async ({ user, start, end, cabang }) => {
+    const innerFilter = salesNameInClause(user, "t.user");
+    const outerFilter = salesNameInClause(user, "k.user");
     let sql = `
     SELECT
     k.id,
@@ -1005,17 +1030,22 @@ const rekapVisitPlanWA = async ({ user, start, end, cabang }) => {
         MAX(t.id)
         ) AS pick_id
     FROM tkunjungan t
-    WHERE t.user = ?
+    WHERE ${innerFilter.sql}
         AND DATE(t.tanggal_plan) >= ?
         AND DATE(t.tanggal_plan) <= ?
     GROUP BY t.user, DATE(t.tanggal_plan), t.cus_kode
     ) p ON p.pick_id = k.id
     LEFT JOIN kencanaprint.tcustomer c ON c.cus_kode = k.cus_kode
     LEFT JOIN tkaryawan ka ON ka.kar_nama = k.user AND ka.kar_isaktif = 1
-    WHERE k.user = ?
+    WHERE ${outerFilter.sql}
     `;
 
-    const params = [user, start, end, user];
+    const params = [
+        ...innerFilter.params,
+        start,
+        end,
+        ...outerFilter.params,
+    ];
 
     if (cabang) {
         sql += ` AND UPPER(ka.kar_cabang) = ?`;
@@ -1241,16 +1271,37 @@ const gantiPassword = async ({ user, oldPassword, newPassword }) => {
 };
 
 const getUserByCabang = async (cabang) => {
+    const cab = String(cabang || "").trim();
+    if (!cab) return [];
+
     const [rows] = await db.query(
-        `SELECT kar_nama, kar_cabang, kar_jabatan, sls_kode 
-            FROM tkaryawan 
-            WHERE kar_isaktif = 1 
-            AND kar_jabatan = 'SALES' 
-            AND kar_cabang = ?`,
-        [cabang],
+        `SELECT kar_nama, kar_cabang, kar_jabatan, sls_kode
+            FROM tkaryawan
+            WHERE kar_isaktif = 1
+            AND kar_jabatan = 'SALES'
+            AND UPPER(kar_cabang) = UPPER(?)`,
+        [cab],
     );
 
-    return rows;
+    // Wajib punya pasangan di tsales (aktif, SALES); duplikat alias digabung jadi kanonik.
+    const [salesRows] = await db.query(
+        `SELECT sal_nama FROM kencanaprint.tsales
+            WHERE COALESCE(sal_aktif, 'Y') != 'N' AND sal_jabatan = 'SALES'`,
+    );
+    const validCanon = new Set(
+        salesRows.map((s) => canonicalSalesName(s.sal_nama)),
+    );
+
+    const seen = new Set();
+    const out = [];
+    for (const r of rows) {
+        const canon = canonicalSalesName(r.kar_nama);
+        if (!canon || !validCanon.has(canon) || seen.has(canon)) continue;
+        seen.add(canon);
+        out.push({ ...r, kar_nama: canon });
+    }
+
+    return out.sort((a, b) => a.kar_nama.localeCompare(b.kar_nama));
 };
 
 module.exports = {

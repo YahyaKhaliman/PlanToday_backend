@@ -8,6 +8,34 @@ const normalizeName = (value) =>
         .replace(/\s+/g, " ")
         .trim();
 
+// Alias nama sales yang merujuk orang sama (kiri = kanonik, kanan = varian tersimpan).
+// Data-driven: tambah baris kalau ada sales yang pakai >1 akun (tkaryawan/tsales/tkunjungan).
+const SALES_ALIAS_GROUPS = [
+    ["ROZIE", ["ROZIE", "ROZI", "FAHRUR ROZI"]],
+    ["ZAKI ARIFIN MAULANA", ["ZAKI ARIFIN MAULANA", "ZAKI ARIFIN", "ZAKI"]],
+    ["ZULFAN", ["ZULFAN", "ZULFAN RIZKI EFENDI"]],
+    ["RICO", ["RICO", "RAMADHAN RICO PRAMUDANA", "RAMADHAN RICO"]],
+];
+
+const ALIAS_TO_CANON = new Map();
+const CANON_TO_MEMBERS = new Map();
+for (const [canon, members] of SALES_ALIAS_GROUPS) {
+    const normCanon = normalizeName(canon);
+    const normMembers = members.map(normalizeName);
+    CANON_TO_MEMBERS.set(normCanon, normMembers);
+    for (const m of normMembers) ALIAS_TO_CANON.set(m, normCanon);
+}
+
+const canonicalSalesName = (name) => {
+    const norm = normalizeName(name);
+    return ALIAS_TO_CANON.get(norm) || norm;
+};
+
+const salesAliasMembers = (name) => {
+    const canon = canonicalSalesName(name);
+    return CANON_TO_MEMBERS.get(canon) || [canon];
+};
+
 const getCandidateSalesCodesFromUser = (user) => {
     const keys = [
         "sales_kode",
@@ -213,4 +241,7 @@ module.exports = {
     findActiveSalesByNik,
     findActiveSalesByNameNormalized,
     getFirstActiveSales,
+    normalizeName,
+    canonicalSalesName,
+    salesAliasMembers,
 };
