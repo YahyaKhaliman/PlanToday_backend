@@ -7,15 +7,29 @@ const requestLogger = require(path.join(__dirname, "middleware", "log"));
 
 const app = express();
 
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use(cors());
+
+app.use(
+    "/uploads",
+    express.static(path.join(__dirname, "uploads"), {
+        setHeaders: (res) => {
+            res.set("Access-Control-Allow-Origin", "*");
+            res.set("Cross-Origin-Resource-Policy", "cross-origin");
+        },
+    }),
+);
 app.use(
     "/image/mintaharga",
-    express.static(path.join(process.cwd(), "image", "mintaharga")),
+    express.static(path.join(__dirname, "image", "mintaharga"), {
+        setHeaders: (res) => {
+            res.set("Access-Control-Allow-Origin", "*");
+            res.set("Cross-Origin-Resource-Policy", "cross-origin");
+        },
+    }),
 );
 
-app.use(cors());
-app.use(express.json({ limit: '3mb' }));
-app.use(express.urlencoded({ extended: true, limit: '3mb' }));
+app.use(express.json({ limit: "3mb" }));
+app.use(express.urlencoded({ extended: true, limit: "3mb" }));
 
 app.use((req, res, next) => {
     const ct = req.headers["content-type"] || "";
