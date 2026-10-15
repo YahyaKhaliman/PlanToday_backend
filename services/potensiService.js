@@ -520,13 +520,12 @@ const getList = async ({
 
     if (effectiveSalesKode) {
         whereClauses.push(
-            "(p.pot_sal_kode = ? OR s.sal_nama = ? OR s.sal_nama LIKE ? OR m.mspk_sal_kode = ?)",
+            "(p.pot_sal_kode = ? OR s.sal_nama = ? OR s.sal_nama LIKE ?)",
         );
         params.push(
             effectiveSalesKode,
             effectiveSalesKode,
             `%${effectiveSalesKode}%`,
-            effectiveSalesKode,
         );
     }
 
@@ -536,269 +535,221 @@ const getList = async ({
             (
                 p.pot_nomor LIKE ?
                 OR p.pot_nama_item LIKE ?
-                OR COALESCE(m.mspk_nama, '') LIKE ?
-                OR COALESCE(d.pend_nama_barang, '') LIKE ?
                 OR COALESCE(p.pot_pen_nomor, '') LIKE ?
-                OR COALESCE(p.pot_mspk_nomor, m.mspk_nomor, '') LIKE ?
+                OR COALESCE(p.pot_mspk_nomor, '') LIKE ?
                 OR COALESCE(c.cus_nama, '') LIKE ?
                 OR COALESCE(s.sal_nama, '') LIKE ?
             )
         `);
-        params.push(like, like, like, like, like, like, like, like);
+        params.push(like, like, like, like, like, like);
     }
 
     const normalizedStatus = String(statusFilter || "ALL")
         .trim()
         .toUpperCase();
-    if (normalizedStatus === "POTENSI" || normalizedStatus === "OPEN") {
-        whereClauses.push(
-            "(p.pot_status IS NULL OR p.pot_status NOT IN ('CLOSE', 'BATAL'))",
-        );
-    } else if (normalizedStatus === "CLOSE") {
-        whereClauses.push("p.pot_status = 'CLOSE'");
-    } else if (normalizedStatus === "BATAL") {
+    if (normalizedStatus === "BATAL") {
         whereClauses.push("p.pot_status = 'BATAL'");
+    } else if (normalizedStatus === "POTENSI" || normalizedStatus === "OPEN") {
+        whereClauses.push("(p.pot_status IS NULL OR p.pot_status <> 'BATAL')");
     }
 
     const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
 
-    // Query Detail List Dinamis dengan LEFT JOIN ke MAP & Penawaran
-    const [listRows] = await db.query(
+    // 1. Query Potensi dengan left join dasar (Cepat & Non-Blocking)
+    const [rawRows] = await db.query(
         `
         SELECT 
             p.pot_nomor,
             p.pot_sal_kode,
-            COALESCE(MAX(s.sal_kode), p.pot_sal_kode) AS sales_kode,
-            COALESCE(MAX(s.sal_nama), '') AS sal_nama,
-            COALESCE(MAX(s.sal_nama), '') AS sales_nama,
+            COALESCE(s.sal_nama, '') AS sal_nama,
             p.pot_cus_kode,
-            COALESCE(MAX(c.cus_kode), p.pot_cus_kode) AS customer_kode,
-            COALESCE(MAX(c.cus_nama), '') AS cus_nama,
-            COALESCE(MAX(c.cus_nama), '') AS customer_nama,
+            COALESCE(c.cus_nama, '') AS cus_nama,
             p.pot_pen_nomor,
-            p.pot_pen_nomor AS pen_nomor,
-            COALESCE(p.pot_mspk_nomor, MAX(m.mspk_nomor), '') AS mspk_nomor,
-            COALESCE(p.pot_mspk_nomor, MAX(m.mspk_nomor), '') AS pot_mspk_nomor,
-            IF(p.pot_pen_nomor IS NOT NULL AND p.pot_pen_nomor <> '', 'PENAWARAN', 'MAP') AS tipe_sumber,
-            COALESCE(p.pot_pen_nomor, p.pot_mspk_nomor, MAX(m.mspk_nomor), '') AS nomor_sumber,
-            (
-                IF(
-                    p.pot_pen_nomor IS NOT NULL AND (
-                        EXISTS (
-                            SELECT 1 FROM tspk s WHERE s.spk_pen_nomor = p.pot_pen_nomor AND s.spk_aktif = 'Y'
-                            UNION SELECT 1 FROM tsalesorder so WHERE so.so_pen_nomor = p.pot_pen_nomor AND so.so_aktif = 'Y'
-                        )
-                        OR EXISTS (
-                            SELECT 1 FROM tmemospk m_pen
-                            WHERE m_pen.mspk_pen_nomor = p.pot_pen_nomor
-                              AND (
-                                  (p.pot_pend_id IS NOT NULL AND m_pen.mspk_pen_id = p.pot_pend_id)
-                                  OR (p.pot_pend_id IS NULL AND TRIM(m_pen.mspk_nama) = TRIM(p.pot_nama_item))
-                              )
-                              AND m_pen.mspk_aktif = 'Y'
-                              AND (
-                                  EXISTS (
-                                      SELECT 1 FROM tspk s_m 
-                                      WHERE (s_m.spk_memo = m_pen.mspk_nomor OR s_m.spk_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = m_pen.mspk_nomor))
-                                        AND s_m.spk_aktif = 'Y'
-                                  )
-                                  OR EXISTS (
-                                      SELECT 1 FROM tsalesorder so_m 
-                                      WHERE (so_m.so_memo = m_pen.mspk_nomor OR so_m.so_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = m_pen.mspk_nomor))
-                                        AND so_m.so_aktif = 'Y'
-                                  )
-                              )
-                        )
-                    ), 1,
-                    IF(
-                        p.pot_mspk_nomor IS NOT NULL AND (
-                            EXISTS (
-                                SELECT 1 FROM tspk s 
-                                WHERE (s.spk_memo = p.pot_mspk_nomor OR s.spk_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = p.pot_mspk_nomor))
-                                  AND s.spk_aktif = 'Y'
-                            )
-                            OR EXISTS (
-                                SELECT 1 FROM tsalesorder so 
-                                WHERE (so.so_memo = p.pot_mspk_nomor OR so.so_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = p.pot_mspk_nomor))
-                                  AND so.so_aktif = 'Y'
-                            )
-                        ), 1, 0
-                    )
-                )
-            ) AS is_realisasi,
-            COALESCE(
-                NULLIF(MAX(m.mspk_nama), ''),
-                NULLIF(MAX(d.pend_nama_barang), ''),
-                p.pot_nama_item
-            ) AS pot_nama_item,
-            COALESCE(
-                NULLIF(MAX(m.mspk_nama), ''),
-                NULLIF(MAX(d.pend_nama_barang), ''),
-                p.pot_nama_item
-            ) AS nama_item,
-            p.pot_harga AS pot_harga_awal,
-            COALESCE(
-                NULLIF(MAX(COALESCE(m.Mspk_harga, 0) * COALESCE(m.mspk_rencana_order, 1)), 0),
-                NULLIF(MAX(COALESCE(d.pend_harga, 0) * COALESCE(d.pend_qty, 1)), 0),
-                p.pot_harga,
-                0
-            ) AS pot_harga,
-            COALESCE(
-                NULLIF(MAX(COALESCE(m.Mspk_harga, 0) * COALESCE(m.mspk_rencana_order, 1)), 0),
-                NULLIF(MAX(COALESCE(d.pend_harga, 0) * COALESCE(d.pend_qty, 1)), 0),
-                p.pot_harga,
-                0
-            ) AS harga,
-            CASE 
-                WHEN p.pot_status = 'BATAL' THEN 'BATAL'
-                WHEN p.pot_status = 'CLOSE' THEN 'CLOSE'
-                WHEN (
-                    (
-                        p.pot_pen_nomor IS NOT NULL AND (
-                            EXISTS (
-                                SELECT 1 FROM tspk s WHERE s.spk_pen_nomor = p.pot_pen_nomor AND s.spk_aktif = 'Y'
-                                UNION SELECT 1 FROM tsalesorder so WHERE so.so_pen_nomor = p.pot_pen_nomor AND so.so_aktif = 'Y'
-                            )
-                            OR EXISTS (
-                                SELECT 1 FROM tmemospk m_pen
-                                WHERE m_pen.mspk_pen_nomor = p.pot_pen_nomor
-                                  AND (
-                                      (p.pot_pend_id IS NOT NULL AND m_pen.mspk_pen_id = p.pot_pend_id)
-                                      OR (p.pot_pend_id IS NULL AND TRIM(m_pen.mspk_nama) = TRIM(p.pot_nama_item))
-                                  )
-                                  AND m_pen.mspk_aktif = 'Y'
-                                  AND (
-                                      EXISTS (
-                                          SELECT 1 FROM tspk s_m 
-                                          WHERE (s_m.spk_memo = m_pen.mspk_nomor OR s_m.spk_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = m_pen.mspk_nomor))
-                                            AND s_m.spk_aktif = 'Y'
-                                      )
-                                      OR EXISTS (
-                                          SELECT 1 FROM tsalesorder so_m 
-                                          WHERE (so_m.so_memo = m_pen.mspk_nomor OR so_m.so_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = m_pen.mspk_nomor))
-                                            AND so_m.so_aktif = 'Y'
-                                      )
-                                  )
-                            )
-                        )
-                    )
-                    OR (
-                        p.pot_mspk_nomor IS NOT NULL AND (
-                            EXISTS (
-                                SELECT 1 FROM tspk s 
-                                WHERE (s.spk_memo = p.pot_mspk_nomor OR s.spk_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = p.pot_mspk_nomor))
-                                  AND s.spk_aktif = 'Y'
-                            )
-                            OR EXISTS (
-                                SELECT 1 FROM tsalesorder so 
-                                WHERE (so.so_memo = p.pot_mspk_nomor OR so.so_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = p.pot_mspk_nomor))
-                                  AND so.so_aktif = 'Y'
-                            )
-                        )
-                    )
-                ) THEN 'CLOSE'
-                ELSE 'POTENSI'
-            END AS pot_status,
-            CASE 
-                WHEN p.pot_status = 'BATAL' THEN 'BATAL'
-                WHEN p.pot_status = 'CLOSE' THEN 'CLOSE'
-                WHEN (
-                    (
-                        p.pot_pen_nomor IS NOT NULL AND (
-                            EXISTS (
-                                SELECT 1 FROM tspk s WHERE s.spk_pen_nomor = p.pot_pen_nomor AND s.spk_aktif = 'Y'
-                                UNION SELECT 1 FROM tsalesorder so WHERE so.so_pen_nomor = p.pot_pen_nomor AND so.so_aktif = 'Y'
-                            )
-                            OR EXISTS (
-                                SELECT 1 FROM tmemospk m_pen
-                                WHERE m_pen.mspk_pen_nomor = p.pot_pen_nomor
-                                  AND (
-                                      (p.pot_pend_id IS NOT NULL AND m_pen.mspk_pen_id = p.pot_pend_id)
-                                      OR (p.pot_pend_id IS NULL AND TRIM(m_pen.mspk_nama) = TRIM(p.pot_nama_item))
-                                  )
-                                  AND m_pen.mspk_aktif = 'Y'
-                                  AND (
-                                      EXISTS (
-                                          SELECT 1 FROM tspk s_m 
-                                          WHERE (s_m.spk_memo = m_pen.mspk_nomor OR s_m.spk_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = m_pen.mspk_nomor))
-                                            AND s_m.spk_aktif = 'Y'
-                                      )
-                                      OR EXISTS (
-                                          SELECT 1 FROM tsalesorder so_m 
-                                          WHERE (so_m.so_memo = m_pen.mspk_nomor OR so_m.so_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = m_pen.mspk_nomor))
-                                            AND so_m.so_aktif = 'Y'
-                                      )
-                                  )
-                            )
-                        )
-                    )
-                    OR (
-                        p.pot_mspk_nomor IS NOT NULL AND (
-                            EXISTS (
-                                SELECT 1 FROM tspk s 
-                                WHERE (s.spk_memo = p.pot_mspk_nomor OR s.spk_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = p.pot_mspk_nomor))
-                                  AND s.spk_aktif = 'Y'
-                            )
-                            OR EXISTS (
-                                SELECT 1 FROM tsalesorder so 
-                                WHERE (so.so_memo = p.pot_mspk_nomor OR so.so_memo IN (SELECT m_r.mspk_nomor FROM tmemospk m_r WHERE m_r.mspk_referensi = p.pot_mspk_nomor))
-                                  AND so.so_aktif = 'Y'
-                            )
-                        )
-                    )
-                ) THEN 'CLOSE'
-                ELSE 'POTENSI'
-            END AS status,
-            COALESCE(p.pot_alasan_batal, '') AS pot_alasan_batal,
-            COALESCE(p.pot_alasan_batal, '') AS alasan_batal,
-            DATE_FORMAT(p.date_create, '%Y-%m-%d %H:%i:%s') AS pot_tanggal,
-            DATE_FORMAT(p.date_create, '%Y-%m-%d %H:%i:%s') AS date_create,
-            COALESCE(p.user_create, '') AS user_create
-        FROM tpotensi p
-        LEFT JOIN tmemospk m 
-            ON (
-                (p.pot_mspk_nomor IS NOT NULL AND m.mspk_nomor = p.pot_mspk_nomor)
-                OR (
-                    p.pot_pen_nomor IS NOT NULL 
-                    AND m.mspk_pen_nomor = p.pot_pen_nomor 
-                    AND (
-                        (p.pot_pend_id IS NOT NULL AND m.mspk_pen_id = p.pot_pend_id)
-                        OR (p.pot_pend_id IS NULL AND (m.mspk_nama = p.pot_nama_item OR m.mspk_nama LIKE CONCAT('%', p.pot_nama_item, '%')))
-                    )
-                )
-            )
-            AND m.mspk_aktif = 'Y'
-            AND COALESCE(m.mspk_close, '') <> 'Y'
-        LEFT JOIN tpenawaran_hdr h 
-            ON h.pen_nomor = COALESCE(p.pot_pen_nomor, m.mspk_pen_nomor)
-        LEFT JOIN tpenawaran_dtl d 
-            ON d.pend_pen_nomor = h.pen_nomor 
-           AND (
-               (p.pot_pend_id IS NOT NULL AND d.pend_id = p.pot_pend_id)
-               OR (p.pot_pend_id IS NULL AND (d.pend_id = m.mspk_pen_id OR TRIM(d.pend_nama_barang) = TRIM(p.pot_nama_item)))
-           )
-        LEFT JOIN tcustomer c 
-            ON c.cus_kode = COALESCE(p.pot_cus_kode, m.mspk_cus_kode, h.pen_cus_kode)
-        LEFT JOIN tsales s 
-            ON s.sal_kode = COALESCE(p.pot_sal_kode, m.mspk_sal_kode, h.pen_sal_kode)
-        ${whereSql}
-        GROUP BY 
-            p.pot_nomor,
-            p.pot_sal_kode,
-            p.pot_cus_kode,
-            p.pot_pen_nomor,
+            p.pot_pend_id,
             p.pot_mspk_nomor,
             p.pot_nama_item,
-            p.pot_harga,
+            p.pot_harga AS pot_harga_awal,
             p.pot_status,
             p.pot_alasan_batal,
-            p.date_create,
-            p.user_create
+            DATE_FORMAT(p.date_create, '%Y-%m-%d %H:%i:%s') AS pot_tanggal,
+            DATE_FORMAT(p.date_create, '%Y-%m-%d %H:%i:%s') AS date_create,
+            COALESCE(p.user_create, '') AS user_create,
+            m_self.mspk_nama AS m_self_nama,
+            m_self.mspk_harga AS m_self_harga,
+            m_self.mspk_rencana_order AS m_self_qty,
+            m_pen.mspk_nomor AS m_pen_nomor,
+            m_pen.mspk_nama AS m_pen_nama,
+            m_pen.mspk_harga AS m_pen_harga,
+            m_pen.mspk_rencana_order AS m_pen_qty
+        FROM tpotensi p
+        LEFT JOIN tsales s ON s.sal_kode = p.pot_sal_kode
+        LEFT JOIN tcustomer c ON c.cus_kode = p.pot_cus_kode
+        LEFT JOIN tmemospk m_self 
+            ON p.pot_mspk_nomor IS NOT NULL AND m_self.mspk_nomor = p.pot_mspk_nomor AND m_self.mspk_aktif = 'Y'
+        LEFT JOIN tmemospk m_pen
+            ON p.pot_pen_nomor IS NOT NULL
+            AND m_pen.mspk_pen_nomor = p.pot_pen_nomor
+            AND m_pen.mspk_pen_id = p.pot_pend_id
+            AND m_pen.mspk_aktif = 'Y'
+        ${whereSql}
         ORDER BY p.date_create DESC, p.pot_nomor DESC
         LIMIT 300
         `,
         params,
     );
+
+    // Kumpulkan nomor MAP & Penawaran unik
+    const allMemoNos = new Set();
+    const penNos = new Set();
+    for (const r of rawRows) {
+        if (r.pot_mspk_nomor) allMemoNos.add(r.pot_mspk_nomor);
+        if (r.m_pen_nomor) allMemoNos.add(r.m_pen_nomor);
+        if (r.pot_pen_nomor && !r.m_pen_nomor) penNos.add(r.pot_pen_nomor);
+    }
+
+    // 2. Lacak revisi berantai MAP secara batch jika ada memo (selaras Manksi Web)
+    let currentMemos = [...allMemoNos];
+    const memoChainMap = new Map(); // parentMemo -> childMemo row
+
+    if (currentMemos.length > 0) {
+        for (let step = 0; step < 5; step++) {
+            if (currentMemos.length === 0) break;
+            const [revisions] = await db.query(
+                `SELECT mspk_nomor, mspk_referensi, mspk_nama, mspk_harga, mspk_rencana_order 
+                 FROM tmemospk 
+                 WHERE mspk_aktif = 'Y' AND mspk_referensi IN (?)`,
+                [currentMemos],
+            );
+            if (!revisions || revisions.length === 0) break;
+
+            const nextMemos = [];
+            for (const rev of revisions) {
+                memoChainMap.set(rev.mspk_referensi, rev);
+                allMemoNos.add(rev.mspk_nomor);
+                nextMemos.push(rev.mspk_nomor);
+            }
+            currentMemos = nextMemos;
+        }
+    }
+
+    // 3. Batch query realisasi ke SPK & SO (Non-Blocking)
+    const memoReal = new Set();
+    if (allMemoNos.size > 0) {
+        const list = [...allMemoNos];
+        const [found] = await db.query(
+            `SELECT so_memo AS n FROM tsalesorder WHERE so_aktif = 'Y' AND so_memo IN (?)
+             UNION
+             SELECT spk_memo AS n FROM tspk WHERE spk_aktif = 'Y' AND spk_memo IN (?)`,
+            [list, list],
+        );
+        for (const f of found) memoReal.add(f.n);
+    }
+
+    const penReal = new Set();
+    if (penNos.size > 0) {
+        const list = [...penNos];
+        const [found] = await db.query(
+            `SELECT spk_pen_nomor AS n FROM tspk WHERE spk_aktif = 'Y' AND spk_pen_nomor IN (?)
+             UNION
+             SELECT so_pen_nomor AS n FROM tsalesorder WHERE so_aktif = 'Y' AND so_pen_nomor IN (?)`,
+            [list, list],
+        );
+        for (const f of found) penReal.add(f.n);
+    }
+
+    // 4. Resolve data di Javascript (Sangat cepat, <1ms)
+    let listRows = rawRows.map((r) => {
+        const baseMemo = r.m_pen_nomor || r.pot_mspk_nomor;
+        const memoList = [];
+        let curr = baseMemo;
+        while (curr) {
+            memoList.push(curr);
+            const next = memoChainMap.get(curr);
+            curr = next ? next.mspk_nomor : null;
+        }
+
+        const latestMemo =
+            memoList.length > 1
+                ? memoChainMap.get(memoList[memoList.length - 2]) || null
+                : null;
+        const topMemoNo =
+            memoList.length > 0 ? memoList[memoList.length - 1] : null;
+
+        const adaMemoReal = memoList.some((m) => memoReal.has(m));
+        const adaPenReal =
+            !!r.pot_pen_nomor && !r.m_pen_nomor && penReal.has(r.pot_pen_nomor);
+        const isReal = adaMemoReal || adaPenReal ? 1 : 0;
+
+        const resolvedNomor = topMemoNo || r.pot_pen_nomor || "";
+        const resolvedNama =
+            (latestMemo && latestMemo.mspk_nama) ||
+            r.m_self_nama ||
+            r.m_pen_nama ||
+            r.pot_nama_item;
+
+        let resolvedHarga = r.pot_harga_awal;
+        if (
+            latestMemo &&
+            latestMemo.mspk_harga &&
+            latestMemo.mspk_rencana_order
+        ) {
+            resolvedHarga =
+                latestMemo.mspk_harga * latestMemo.mspk_rencana_order;
+        } else if (r.m_self_harga && r.m_self_qty) {
+            resolvedHarga = r.m_self_harga * r.m_self_qty;
+        } else if (r.m_pen_harga && r.m_pen_qty) {
+            resolvedHarga = r.m_pen_harga * r.m_pen_qty;
+        }
+
+        let statusFinal = "POTENSI";
+        if (r.pot_status === "BATAL") {
+            statusFinal = "BATAL";
+        } else if (r.pot_status === "CLOSE" || isReal === 1) {
+            statusFinal = "CLOSE";
+        }
+
+        const tipeSumber =
+            r.pot_mspk_nomor || r.m_pen_nomor ? "MAP" : "PENAWARAN";
+
+        return {
+            pot_nomor: r.pot_nomor,
+            pot_sal_kode: r.pot_sal_kode,
+            sales_kode: r.pot_sal_kode,
+            sal_nama: r.sal_nama,
+            sales_nama: r.sal_nama,
+            pot_cus_kode: r.pot_cus_kode,
+            customer_kode: r.pot_cus_kode,
+            cus_nama: r.cus_nama,
+            customer_nama: r.cus_nama,
+            pot_pen_nomor: r.pot_pen_nomor,
+            pen_nomor: r.pot_pen_nomor,
+            mspk_nomor: r.m_pen_nomor || r.pot_mspk_nomor || "",
+            pot_mspk_nomor: r.m_pen_nomor || r.pot_mspk_nomor || "",
+            tipe_sumber: tipeSumber,
+            nomor_sumber: resolvedNomor,
+            is_realisasi: isReal,
+            pot_nama_item: resolvedNama,
+            nama_item: resolvedNama,
+            pot_harga_awal: toNumber(r.pot_harga_awal, 0),
+            pot_harga: toNumber(resolvedHarga, 0),
+            harga: toNumber(resolvedHarga, 0),
+            pot_status: statusFinal,
+            status: statusFinal,
+            pot_alasan_batal: r.pot_alasan_batal || "",
+            alasan_batal: r.pot_alasan_batal || "",
+            pot_tanggal: r.pot_tanggal,
+            date_create: r.date_create,
+            user_create: r.user_create,
+        };
+    });
+
+    if (normalizedStatus === "POTENSI" || normalizedStatus === "OPEN") {
+        listRows = listRows.filter((r) => r.status === "POTENSI");
+    } else if (normalizedStatus === "CLOSE") {
+        listRows = listRows.filter((r) => r.status === "CLOSE");
+    } else if (normalizedStatus === "BATAL") {
+        listRows = listRows.filter((r) => r.status === "BATAL");
+    }
 
     let availableSales = [];
     if (managerRole) {
