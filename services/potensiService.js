@@ -554,9 +554,40 @@ const getList = async ({
     }
 
     const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
+    const POTENSI_RESOLVE_JOIN = `
+      LEFT JOIN tmemospk map_from_pen
+        ON p.pot_pen_nomor IS NOT NULL
+        AND map_from_pen.mspk_pen_nomor = p.pot_pen_nomor
+        AND map_from_pen.mspk_pen_id = p.pot_pend_id
+        AND map_from_pen.mspk_aktif = 'Y'
+      LEFT JOIN tmemospk map_r1 ON map_r1.mspk_referensi = COALESCE(p.pot_mspk_nomor, map_from_pen.mspk_nomor)
+      LEFT JOIN tmemospk map_r2 ON map_r2.mspk_referensi = map_r1.mspk_nomor
+      LEFT JOIN tmemospk map_r3 ON map_r3.mspk_referensi = map_r2.mspk_nomor
+      LEFT JOIN tmemospk map_r4 ON map_r4.mspk_referensi = map_r3.mspk_nomor
+      LEFT JOIN tmemospk map_r5 ON map_r5.mspk_referensi = map_r4.mspk_nomor
+    `;
 
-    // 1. Query Potensi dengan left join dasar (Cepat & Non-Blocking)
-    const [rawRows] = await db.query(
+    const POTENSI_RESOLVED_NOMOR = `
+      COALESCE(
+        map_r5.mspk_nomor, map_r4.mspk_nomor, map_r3.mspk_nomor,
+        map_r2.mspk_nomor, map_r1.mspk_nomor,
+        map_from_pen.mspk_nomor, p.pot_mspk_nomor, p.pot_pen_nomor
+      )
+    `;
+
+    const POTENSI_RESOLVED_HARGA = `
+      COALESCE(
+        map_r5.mspk_harga * map_r5.mspk_rencana_order,
+        map_r4.mspk_harga * map_r4.mspk_rencana_order,
+        map_r3.mspk_harga * map_r3.mspk_rencana_order,
+        map_r2.mspk_harga * map_r2.mspk_rencana_order,
+        map_r1.mspk_harga * map_r1.mspk_rencana_order,
+        map_from_pen.mspk_harga * map_from_pen.mspk_rencana_order,
+        p.pot_harga
+      )
+    `;
+
+    const [rows] = await db.query(
         `
         SELECT 
             p.pot_nomor,
@@ -567,75 +598,48 @@ const getList = async ({
             p.pot_pen_nomor,
             p.pot_pend_id,
             p.pot_mspk_nomor,
-            p.pot_nama_item,
             p.pot_harga AS pot_harga_awal,
             p.pot_status,
             p.pot_alasan_batal,
             DATE_FORMAT(p.date_create, '%Y-%m-%d %H:%i:%s') AS pot_tanggal,
             DATE_FORMAT(p.date_create, '%Y-%m-%d %H:%i:%s') AS date_create,
             COALESCE(p.user_create, '') AS user_create,
-            m_self.mspk_nama AS m_self_nama,
-            m_self.mspk_harga AS m_self_harga,
-            m_self.mspk_rencana_order AS m_self_qty,
-            m_pen.mspk_nomor AS m_pen_nomor,
-            m_pen.mspk_nama AS m_pen_nama,
-            m_pen.mspk_harga AS m_pen_harga,
-            m_pen.mspk_rencana_order AS m_pen_qty
+            map_from_pen.mspk_nomor AS m0,
+            map_r1.mspk_nomor AS m1,
+            map_r2.mspk_nomor AS m2,
+            map_r3.mspk_nomor AS m3,
+            map_r4.mspk_nomor AS m4,
+            map_r5.mspk_nomor AS m5,
+            ${POTENSI_RESOLVED_NOMOR} AS nomor_sumber,
+            COALESCE(map_r5.mspk_nama, map_r4.mspk_nama, map_r3.mspk_nama,
+                     map_r2.mspk_nama, map_r1.mspk_nama, map_from_pen.mspk_nama,
+                     p.pot_nama_item) AS pot_nama_item,
+            (${POTENSI_RESOLVED_HARGA}) AS pot_harga,
+            IF(p.pot_mspk_nomor IS NOT NULL OR map_from_pen.mspk_nomor IS NOT NULL,
+               'MAP', 'PENAWARAN') AS tipe_sumber
         FROM tpotensi p
         LEFT JOIN tsales s ON s.sal_kode = p.pot_sal_kode
         LEFT JOIN tcustomer c ON c.cus_kode = p.pot_cus_kode
-        LEFT JOIN tmemospk m_self 
-            ON p.pot_mspk_nomor IS NOT NULL AND m_self.mspk_nomor = p.pot_mspk_nomor AND m_self.mspk_aktif = 'Y'
-        LEFT JOIN tmemospk m_pen
-            ON p.pot_pen_nomor IS NOT NULL
-            AND m_pen.mspk_pen_nomor = p.pot_pen_nomor
-            AND m_pen.mspk_pen_id = p.pot_pend_id
-            AND m_pen.mspk_aktif = 'Y'
+        ${POTENSI_RESOLVE_JOIN}
         ${whereSql}
         ORDER BY p.date_create DESC, p.pot_nomor DESC
-        LIMIT 300
         `,
         params,
     );
 
-    // Kumpulkan nomor MAP & Penawaran unik
-    const allMemoNos = new Set();
+    // Kumpulkan nomor MAP & Penawaran unik untuk cek realisasi batch
+    const memoNos = new Set();
     const penNos = new Set();
-    for (const r of rawRows) {
-        if (r.pot_mspk_nomor) allMemoNos.add(r.pot_mspk_nomor);
-        if (r.m_pen_nomor) allMemoNos.add(r.m_pen_nomor);
-        if (r.pot_pen_nomor && !r.m_pen_nomor) penNos.add(r.pot_pen_nomor);
-    }
-
-    // 2. Lacak revisi berantai MAP secara batch jika ada memo (selaras Manksi Web)
-    let currentMemos = [...allMemoNos];
-    const memoChainMap = new Map(); // parentMemo -> childMemo row
-
-    if (currentMemos.length > 0) {
-        for (let step = 0; step < 5; step++) {
-            if (currentMemos.length === 0) break;
-            const [revisions] = await db.query(
-                `SELECT mspk_nomor, mspk_referensi, mspk_nama, mspk_harga, mspk_rencana_order 
-                 FROM tmemospk 
-                 WHERE mspk_aktif = 'Y' AND mspk_referensi IN (?)`,
-                [currentMemos],
-            );
-            if (!revisions || revisions.length === 0) break;
-
-            const nextMemos = [];
-            for (const rev of revisions) {
-                memoChainMap.set(rev.mspk_referensi, rev);
-                allMemoNos.add(rev.mspk_nomor);
-                nextMemos.push(rev.mspk_nomor);
-            }
-            currentMemos = nextMemos;
+    for (const r of rows) {
+        for (const n of [r.pot_mspk_nomor, r.m0, r.m1, r.m2, r.m3, r.m4, r.m5]) {
+            if (n) memoNos.add(n);
         }
+        if (r.pot_pen_nomor && !r.m0) penNos.add(r.pot_pen_nomor);
     }
 
-    // 3. Batch query realisasi ke SPK & SO (Non-Blocking)
     const memoReal = new Set();
-    if (allMemoNos.size > 0) {
-        const list = [...allMemoNos];
+    if (memoNos.size > 0) {
+        const list = [...memoNos];
         const [found] = await db.query(
             `SELECT so_memo AS n FROM tsalesorder WHERE so_aktif = 'Y' AND so_memo IN (?)
              UNION
@@ -657,49 +661,20 @@ const getList = async ({
         for (const f of found) penReal.add(f.n);
     }
 
-    // 4. Resolve data di Javascript (Sangat cepat, <1ms)
-    let listRows = rawRows.map((r) => {
-        const baseMemo = r.m_pen_nomor || r.pot_mspk_nomor;
-        const memoList = [];
-        let curr = baseMemo;
-        while (curr) {
-            memoList.push(curr);
-            const next = memoChainMap.get(curr);
-            curr = next ? next.mspk_nomor : null;
-        }
+    // Resolve status di Javascript
+    let listRows = rows.map((r) => {
+        const adaMemoReal = [
+            r.pot_mspk_nomor,
+            r.m0,
+            r.m1,
+            r.m2,
+            r.m3,
+            r.m4,
+            r.m5,
+        ].some((n) => n && memoReal.has(n));
 
-        const latestMemo =
-            memoList.length > 1
-                ? memoChainMap.get(memoList[memoList.length - 2]) || null
-                : null;
-        const topMemoNo =
-            memoList.length > 0 ? memoList[memoList.length - 1] : null;
-
-        const adaMemoReal = memoList.some((m) => memoReal.has(m));
-        const adaPenReal =
-            !!r.pot_pen_nomor && !r.m_pen_nomor && penReal.has(r.pot_pen_nomor);
+        const adaPenReal = !!r.pot_pen_nomor && !r.m0 && penReal.has(r.pot_pen_nomor);
         const isReal = adaMemoReal || adaPenReal ? 1 : 0;
-
-        const resolvedNomor = topMemoNo || r.pot_pen_nomor || "";
-        const resolvedNama =
-            (latestMemo && latestMemo.mspk_nama) ||
-            r.m_self_nama ||
-            r.m_pen_nama ||
-            r.pot_nama_item;
-
-        let resolvedHarga = r.pot_harga_awal;
-        if (
-            latestMemo &&
-            latestMemo.mspk_harga &&
-            latestMemo.mspk_rencana_order
-        ) {
-            resolvedHarga =
-                latestMemo.mspk_harga * latestMemo.mspk_rencana_order;
-        } else if (r.m_self_harga && r.m_self_qty) {
-            resolvedHarga = r.m_self_harga * r.m_self_qty;
-        } else if (r.m_pen_harga && r.m_pen_qty) {
-            resolvedHarga = r.m_pen_harga * r.m_pen_qty;
-        }
 
         let statusFinal = "POTENSI";
         if (r.pot_status === "BATAL") {
@@ -708,8 +683,7 @@ const getList = async ({
             statusFinal = "CLOSE";
         }
 
-        const tipeSumber =
-            r.pot_mspk_nomor || r.m_pen_nomor ? "MAP" : "PENAWARAN";
+        const hargaFinal = toNumber(r.pot_harga, 0);
 
         return {
             pot_nomor: r.pot_nomor,
@@ -723,16 +697,16 @@ const getList = async ({
             customer_nama: r.cus_nama,
             pot_pen_nomor: r.pot_pen_nomor,
             pen_nomor: r.pot_pen_nomor,
-            mspk_nomor: r.m_pen_nomor || r.pot_mspk_nomor || "",
-            pot_mspk_nomor: r.m_pen_nomor || r.pot_mspk_nomor || "",
-            tipe_sumber: tipeSumber,
-            nomor_sumber: resolvedNomor,
+            mspk_nomor: r.m0 || r.pot_mspk_nomor || "",
+            pot_mspk_nomor: r.m0 || r.pot_mspk_nomor || "",
+            tipe_sumber: r.tipe_sumber,
+            nomor_sumber: r.nomor_sumber,
             is_realisasi: isReal,
-            pot_nama_item: resolvedNama,
-            nama_item: resolvedNama,
+            pot_nama_item: r.pot_nama_item,
+            nama_item: r.pot_nama_item,
             pot_harga_awal: toNumber(r.pot_harga_awal, 0),
-            pot_harga: toNumber(resolvedHarga, 0),
-            harga: toNumber(resolvedHarga, 0),
+            pot_harga: hargaFinal,
+            harga: hargaFinal,
             pot_status: statusFinal,
             status: statusFinal,
             pot_alasan_batal: r.pot_alasan_batal || "",
