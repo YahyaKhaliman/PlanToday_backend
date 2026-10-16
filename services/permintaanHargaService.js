@@ -982,6 +982,23 @@ const createPermintaanHargaInTransaction = async ({
                     let dtfItem = null;
                     let bordirItem = null;
 
+                    // Ambil tarif paten DTF & BORDIR langsung dari database kencanaprint.tmintaharga_biaya
+                    const [dtfBordirMasterRows] = await conn.query(
+                        `SELECT mhb_jenis, COALESCE(mhb_cm, 0) AS mhb_cm 
+                         FROM tmintaharga_biaya 
+                         WHERE mhb_jenis IN ('DTF', 'BORDIR')`,
+                    );
+                    const dbDtfCm =
+                        Number(
+                            dtfBordirMasterRows?.find((r) => r.mhb_jenis === "DTF")
+                                ?.mhb_cm,
+                        ) || 25;
+                    const dbBordirCm =
+                        Number(
+                            dtfBordirMasterRows?.find((r) => r.mhb_jenis === "BORDIR")
+                                ?.mhb_cm,
+                        ) || 90;
+
                     cetakItems.forEach((c) => {
                         const j = String(c.jenis || "")
                             .toUpperCase()
@@ -994,7 +1011,7 @@ const createPermintaanHargaInTransaction = async ({
                         } else if (j === "DTF") {
                             let p = Number(c.panjang) || 0;
                             let l = Number(c.lebar) || 0;
-                            let cm = Number(c.tarifCm) || 25;
+                            let cm = dbDtfCm; // Kunci paten dari database tmintaharga_biaya
                             if ((!p || !l) && c.ket) {
                                 const m = String(c.ket).match(
                                     /(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i,
@@ -1012,7 +1029,7 @@ const createPermintaanHargaInTransaction = async ({
                         } else if (j === "BORDIR") {
                             let p = Number(c.panjang) || 0;
                             let l = Number(c.lebar) || 0;
-                            let cm = Number(c.tarifCm) || 90;
+                            let cm = dbBordirCm; // Kunci paten dari database tmintaharga_biaya
                             if ((!p || !l) && c.ket) {
                                 const m = String(c.ket).match(
                                     /(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i,
@@ -3697,6 +3714,7 @@ const calculateMmt = async ({
 const calculateGarmen = async ({
     kodeModel = "KH-0001",
     jenisKain = "COMBED 30S",
+    kategori = "",
     warna = "MUDA",
     qty = 100,
     tambahanList = [],
@@ -3716,7 +3734,7 @@ const calculateGarmen = async ({
         [normKodeModel, normJenisKain],
     );
 
-    let ktg = "COTTON";
+    let ktg = String(kategori || "").toUpperCase().trim() || "COTTON";
     let hargaBahan = 0;
     let hargaBahanBesar = 0;
     let allowancePersen = 17;
@@ -3728,7 +3746,7 @@ const calculateGarmen = async ({
     let hargaBahanLenganBesar = 0;
 
     if (kainRows.length > 0) {
-        ktg = (kainRows[0].mhk_ktg || "COTTON").toUpperCase().trim();
+        ktg = (kainRows[0].mhk_ktg || ktg || "COTTON").toUpperCase().trim();
         allowancePersen = toNumber(
             kainRows[0].mhk_allow,
             ktg === "PE" || ktg === "HYGIT" || ktg === "DRYFIT" ? 5 : 17,
@@ -4183,6 +4201,8 @@ const calculateGarmen = async ({
     const calcResult = kalkulasiGarmenEngine({
         customTiers,
         kodeModel: normKodeModel,
+        kategori: ktg,
+        jenisKain: normJenisKain,
         hargaBahan,
         hargaBahanBesar,
         hargaBahanLengan:
@@ -4239,7 +4259,9 @@ const calculateGarmen = async ({
             minOrder: t.qmin,
             maxOrder: t.qmax,
             marginPercent: t.persen,
-            hargaJual: t.up || t.jual,
+            hargaUp: t.up,
+            up: t.up,
+            hargaJual: t.up,
             label: t.label,
         })),
     };
@@ -4424,8 +4446,11 @@ const getCetakOptions = async (options = {}) => {
         } else if (targetKategori === "PE") {
             return hasPe;
         } else {
-            // Default COTTON
-            return hasCotton;
+            // Default COTTON: sertakan varian COTTON spesifik atau varian umum (MEDIUM) yang bukan PE/LACOST
+            if (hasCotton) return true;
+            if (hasPe || hasLacost) return false;
+            // Hindari duplikasi varian generik jika ada varian COTTON khusus (seperti RUBBER)
+            return !ketUpper.startsWith("RUBBER");
         }
     });
 

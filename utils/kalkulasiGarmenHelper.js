@@ -125,10 +125,49 @@ function hitungBiayaKonveksi({ isSport = false, customBiayaJahit }) {
 }
 
 /**
- * Membulatkan harga ke ribuan terdekat ke atas (Harga UP)
+ * Helper untuk mengecek apakah jenis kain termasuk PE, HYGIT atau DRYFIT (pembulatan ratusan 100)
+ * Sesuai logika resmi Manksi Web (SettingHargaGarmenView.vue baris 79-108)
  */
-function bulatkanHargaUp(harga) {
-    return Math.ceil(Number(harga) / 1000) * 1000;
+function isPeOrHygitKain(ktg = "", jenisKain = "") {
+    const cleanKtg = String(ktg || "").toUpperCase().trim();
+    const cleanJk = String(jenisKain || "").toUpperCase().trim();
+
+    if (cleanJk.includes("LACOST") || cleanKtg === "LACOST") return false;
+
+    // DRYFIT — pembulatan ratusan (100) seperti PE/HYGIT
+    if (cleanJk.includes("DRYFIT") || cleanKtg === "DRYFIT") return true;
+
+    // HYGIT / HYGET — pembulatan ratusan (100)
+    if (
+        cleanKtg.includes("HYGIT") ||
+        cleanKtg.includes("HYGET") ||
+        cleanJk.includes("HYGIT") ||
+        cleanJk.includes("HYGET")
+    ) {
+        return true;
+    }
+
+    // PE — pembulatan ratusan (100)
+    if (
+        cleanKtg === "PE" ||
+        cleanJk.startsWith("PE") ||
+        cleanJk.includes(" PE")
+    ) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Membulatkan harga ke atas sesuai unit pembulatan:
+ * - 100 untuk PE, HYGIT, DRYFIT
+ * - 1000 untuk COTTON, LACOST, dan lainnya
+ * Sesuai Manksi Web SettingHargaGarmenView.vue
+ */
+function bulatkanHargaUp(harga, roundUnit = 1000) {
+    const unit = Number(roundUnit) > 0 ? Number(roundUnit) : 1000;
+    return Math.ceil(Number(harga) / unit) * unit;
 }
 
 /**
@@ -136,6 +175,8 @@ function bulatkanHargaUp(harga) {
  */
 function kalkulasiGarmenEngine({
     kodeModel = "KH-0001",
+    kategori = "COTTON",
+    jenisKain = "",
     hargaBahan = 0,
     hargaBahanBesar,
     hargaBahanLengan,
@@ -159,6 +200,7 @@ function kalkulasiGarmenEngine({
     const numQty = Number(qty) > 0 ? Number(qty) : 1;
     const tiersList = getTiersMargin(normModel, customTiers);
     const isPartaiBesar = numQty >= 1000;
+    const roundUnit = isPeOrHygitKain(kategori, jenisKain) ? 100 : 1000;
 
     const finalHargaBahanBesar =
         Number(hargaBahanBesar) > 0
@@ -261,7 +303,7 @@ function kalkulasiGarmenEngine({
     const matchedTier = tentukanTierMargin(numQty, tiersList);
     const marginRp = Math.round(activeHpp * (matchedTier.persen / 100));
     const hargaBahanDasar = activeHpp + marginRp;
-    const hargaBahanUp = bulatkanHargaUp(hargaBahanDasar);
+    const hargaBahanUp = bulatkanHargaUp(hargaBahanDasar, roundUnit);
 
     // Total Kalkulasi = Harga Bahan (UP dari master bahan) + Tambahan/pcs + Cetak/pcs
     const totalTambahanDanCetakPerPcs = tambahanPerPcs + cetakPerPcs;
@@ -274,7 +316,7 @@ function kalkulasiGarmenEngine({
         const currentHpp = isTierBesar ? hppBesar : hppReguler;
         const m = Math.round(currentHpp * (t.persen / 100));
         const j = Math.round(currentHpp + m);
-        const u = bulatkanHargaUp(j);
+        const u = bulatkanHargaUp(j, roundUnit);
         return {
             tier: t.tier,
             label: t.label,
@@ -312,6 +354,7 @@ function kalkulasiGarmenEngine({
             marginRp,
             hargaBahanUp,
         },
+        roundUnit,
         hargaJualPerPcs,
         hargaUpPerPcs,
         totalHargaOrder,
@@ -327,6 +370,7 @@ module.exports = {
     tentukanTierMargin,
     hitungKomponenBahan,
     hitungBiayaKonveksi,
+    isPeOrHygitKain,
     bulatkanHargaUp,
     kalkulasiGarmenEngine,
 };
