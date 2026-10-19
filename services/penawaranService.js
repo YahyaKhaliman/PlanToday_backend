@@ -888,6 +888,14 @@ const getPenawaranDetail = async ({ managerRole, authSalesKode, nomor }) => {
             COALESCE(h.pen_proyeksi, '') AS proyeksi,
             COALESCE(h.pen_mx, '') AS mx,
             COALESCE(h.pen_digitalsign, '') AS digital_sign,
+            COALESCE(p.perush_alamatnpwp, '') AS perush_alamatnpwp,
+            COALESCE(p.perush_telp, '') AS perush_telp,
+            COALESCE(p.perush_fax, '') AS perush_fax,
+            COALESCE(p.perush_email, '') AS perush_email,
+            COALESCE(h.pen_sample, '') AS sample,
+            COALESCE(e.perushd_bank, '') AS bank,
+            COALESCE(e.perushd_atasnama, '') AS bank_atasnama,
+            COALESCE(e.perushd_cabang, '') AS bank_cabang,
             IF(
                 h.pen_cetaktotal = 1,
                 COALESCE((SELECT SUM(d.pend_qty * d.pend_harga) FROM tpenawaran_dtl d WHERE d.pend_pen_nomor = h.pen_nomor), 0),
@@ -909,6 +917,7 @@ const getPenawaranDetail = async ({ managerRole, authSalesKode, nomor }) => {
         FROM tpenawaran_hdr h
         INNER JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
         INNER JOIN tperusahaan p ON p.perush_kode = h.pen_perush_kode
+        LEFT JOIN tperusahaan_dtl e ON p.perush_kode = e.perushd_perush_kode AND e.perushd_rekening = h.pen_rekening
         LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
         LEFT JOIN tdivisi v ON v.kode = h.pen_divisi
         WHERE h.pen_nomor = ?
