@@ -236,12 +236,15 @@ const createPermintaanHargaInTransaction = async ({
 
     if (payload.mh_status) {
         initialStatus = String(payload.mh_status).trim().toUpperCase();
-    } else if (hargaKalkulasi > 0) {
-        if (hargaPengajuan === 0 || hargaPengajuan >= hargaKalkulasi) {
-            initialStatus = "DONE";
-            if (hargaPengajuan === 0) {
-                hargaPengajuan = hargaKalkulasi;
+        // Pengaman: Jika harga pengajuan 0 atau di bawah harga kalkulasi, status harus NEGO (tidak boleh DONE)
+        if (hargaKalkulasi > 0 && (hargaPengajuan === 0 || hargaPengajuan < hargaKalkulasi)) {
+            if (initialStatus === "DONE") {
+                initialStatus = "NEGO";
             }
+        }
+    } else if (hargaKalkulasi > 0) {
+        if (hargaPengajuan > 0 && hargaPengajuan >= hargaKalkulasi) {
+            initialStatus = "DONE";
         } else {
             initialStatus = "NEGO";
         }
@@ -312,19 +315,17 @@ const createPermintaanHargaInTransaction = async ({
                 ? Math.round(hargaPengajuan / ppnMultiplier)
                 : hargaPengajuan;
         } else {
-            kalRpSales = kalRpSistem;
-            hargaPengajuan =
-                kalPpn > 0
-                    ? Math.round(kalRpSales * ppnMultiplier)
-                    : kalRpSales;
+            // Jika sales mengisi 0, jangan ditimpa dengan kalkulasi sistem! Tetap 0 dan status NEGO
+            kalRpSales = 0;
+            hargaPengajuan = 0;
         }
 
-        // Pengecekan status: jika pengajuan sales < kalkulasi sistem maka NEGO, jika >= maka DONE
+        // Pengecekan status: jika pengajuan sales < kalkulasi sistem atau bernilai 0 maka NEGO, jika >= maka DONE
         if (kalRpSistem > 0) {
-            if (kalRpSales < kalRpSistem) {
-                initialStatus = "NEGO";
-            } else {
+            if (kalRpSales > 0 && kalRpSales >= kalRpSistem) {
                 initialStatus = "DONE";
+            } else {
+                initialStatus = "NEGO";
             }
         } else {
             initialStatus = "BELUM";
@@ -1241,7 +1242,7 @@ const createPermintaanHargaInTransaction = async ({
                 salesKode,
                 String(payload.mh_nama || "").trim(),
                 toNumber(payload.mh_jmlorder, 0),
-                toNumber(payload.mh_harga, 0),
+                hargaPengajuan,
                 toNumber(payload.mh_budget, 0),
                 payload.mh_dateorder
                     ? normalizeDate(payload.mh_dateorder)
@@ -1297,7 +1298,7 @@ const createPermintaanHargaInTransaction = async ({
                     salesKode,
                     String(payload.mh_nama || "").trim(),
                     toNumber(payload.mh_jmlorder, 0),
-                    toNumber(payload.mh_harga, 0),
+                    hargaPengajuan,
                     toNumber(payload.mh_budget, 0),
                     payload.mh_dateorder
                         ? normalizeDate(payload.mh_dateorder)
