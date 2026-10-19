@@ -964,8 +964,9 @@ const createPermintaanHargaInTransaction = async ({
                     }
 
                     // ==========================================
-                    // PENYIMPANAN DATA CETAK / SUBLIM / DTF / BORDIR TERPISAH
-                    // (Tanpa menggunakan tkalkulasi_ctk)
+                    // PENYIMPANAN DATA CETAK / SUBLIM / DTF / BORDIR
+                    // Simpan rincian ke tkalkulasi_ctk (untuk Manksi Web / Delphi)
+                    // serta rekap ke tabel masing-masing
                     // ==========================================
                     let cetakItems = payload.garmen_cetak || [];
                     if (typeof cetakItems === "string") {
@@ -978,6 +979,26 @@ const createPermintaanHargaInTransaction = async ({
                     if (!Array.isArray(cetakItems)) {
                         cetakItems = [];
                     }
+
+                    // 1. Simpan rincian ke kalkulasi.tkalkulasi_ctk
+                    if (cetakItems.length > 0) {
+                        const ctkValues = cetakItems.map((c, idx) => {
+                            const j = String(c.jenis || "").toUpperCase().trim();
+                            let k = String(c.ket || c.nama || "").trim();
+                            if (j && !k.toUpperCase().startsWith(j)) {
+                                k = `${j} ${k}`.trim();
+                            }
+                            return [
+                                nomorKalkulasi,
+                                k || j || "CETAK",
+                                Number(c.biaya) || 0,
+                                idx + 1,
+                            ];
+                        });
+                        const ctkGridSql = `INSERT INTO kalkulasi.tkalkulasi_ctk (kc_nomor, kc_ket, kc_biaya, kc_nourut) VALUES ?`;
+                        await conn.query(ctkGridSql, [ctkValues]);
+                    }
+
                     let totalSablon = 0;
                     let totalSublim = 0;
                     let dtfItem = null;
@@ -4311,13 +4332,14 @@ const getTambahanOptions = async ({
     kodeModel = "KH-0001",
     qty = 0,
 } = {}) => {
-    let resolvedKtg = (kategori || "").toUpperCase().trim();
     const normJenisKain = (jenisKain || "").trim();
+    const jkUpper = normJenisKain.toUpperCase();
+    let resolvedKtg = (kategori || "").toUpperCase().trim();
 
-    if (!resolvedKtg && normJenisKain) {
+    if (normJenisKain) {
         const [kainRows] = await db.query(
             `SELECT mhk_ktg FROM tmintaharga_kain 
-             WHERE mhk_jeniskain = ? 
+             WHERE UPPER(TRIM(mhk_jeniskain)) = UPPER(TRIM(?)) 
              LIMIT 1`,
             [normJenisKain],
         );
@@ -4326,18 +4348,18 @@ const getTambahanOptions = async ({
         }
     }
 
-    const jkUpper = normJenisKain.toUpperCase();
     const isLacost =
         resolvedKtg.includes("LACOST") ||
         jkUpper.includes("LACOST") ||
         jkUpper.includes("PIQUE");
     const isPe =
-        resolvedKtg.includes("PE") ||
-        resolvedKtg.includes("HYGIT") ||
-        resolvedKtg.includes("DRYFIT") ||
-        jkUpper.includes("PE ") ||
-        jkUpper.includes("HYGIT") ||
-        jkUpper.includes("DRYFIT");
+        !isLacost &&
+        (resolvedKtg.includes("PE") ||
+            resolvedKtg.includes("HYGIT") ||
+            resolvedKtg.includes("DRYFIT") ||
+            jkUpper.includes("PE ") ||
+            jkUpper.includes("HYGIT") ||
+            jkUpper.includes("DRYFIT"));
 
     const numQty = toNumber(qty, 0);
     const [rows] = await db.query(
@@ -4360,7 +4382,7 @@ const getTambahanOptions = async ({
 
         if (isLacost) {
             tarif = toNumber(r.mht_lacost, 0);
-            selectedCategory = "LACOSTE";
+            selectedCategory = "LACOST";
         } else if (isPe) {
             const peBesar = toNumber(r.mht_pe_partaibesar, 0);
             const peNormal = toNumber(r.mht_pe, 0);
