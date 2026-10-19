@@ -1218,8 +1218,11 @@ const createPermintaanHargaInTransaction = async ({
                 : kalRpSales;
     }
     const mhHargaKalkulasi = calculatedMhHargaKalkulasi;
-    const mhNomorKalkulasi = initialStatus === "DONE" ? (nomorKalkulasi || null) : null;
-    const mhDateKalkulasi = initialStatus === "DONE" ? (dateKalkulasi || null) : null;
+    // Pada tmintaharga, mh_nomor_kalkulasi dikhususkan untuk nomor kalkulasi Finance (KAL-...).
+    // Nomor kalkulasi Sales (KALS-...) tidak disimpan di tmintaharga.mh_nomor_kalkulasi, melainkan tetap di tkalkulasi_hdr (relasi kal_mh_nomor).
+    const isNomorFinance = String(nomorKalkulasi || "").toUpperCase().startsWith("KAL-");
+    const mhNomorKalkulasi = (initialStatus === "DONE" && isNomorFinance) ? nomorKalkulasi : null;
+    const mhDateKalkulasi = (initialStatus === "DONE" && isNomorFinance) ? (dateKalkulasi || null) : null;
 
     // Coba insert dengan kolom mh_workshop, fallback jika kolom belum ada di DB (ER_BAD_FIELD_ERROR)
     try {
@@ -1860,12 +1863,13 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             },
         };
     }
-    if (String(rows[0].mh_status || "").toUpperCase() !== "BELUM") {
+    const curStatus = String(rows[0].mh_status || "").toUpperCase();
+    if (!["BELUM", "DONE", "NEGO"].includes(curStatus)) {
         return {
             status: 409,
             body: {
                 success: false,
-                message: "Hanya status BELUM yang dapat diubah",
+                message: `Status ${curStatus} tidak dapat diubah`,
             },
         };
     }
@@ -1928,9 +1932,20 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
         toNumber(body.mh_jmlorder || rows[0].mh_jmlorder, 1),
     );
     const updateOngkirPerPcs = Math.round(updateOngkirTotal / updateOrderQty);
-    const existingNomorKal = String(
+    let existingNomorKal = String(
         rows[0].mh_nomor_kalkulasi || body.mh_nomor_kalkulasi || "",
     ).trim();
+    if (!existingNomorKal) {
+        try {
+            const [[kHdr]] = await db.query(
+                "SELECT kal_nomor FROM kalkulasi.tkalkulasi_hdr WHERE kal_mh_nomor = ? LIMIT 1",
+                [nomor],
+            );
+            if (kHdr?.kal_nomor) {
+                existingNomorKal = kHdr.kal_nomor;
+            }
+        } catch (e) {}
+    }
     if (existingNomorKal) {
         try {
             await db.query(
