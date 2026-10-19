@@ -1220,8 +1220,12 @@ const createPermintaanHargaInTransaction = async ({
     const mhHargaKalkulasi = calculatedMhHargaKalkulasi;
     // Pada tmintaharga, mh_nomor_kalkulasi dikhususkan untuk nomor kalkulasi Finance (KAL-...).
     // Nomor kalkulasi Sales (KALS-...) tidak disimpan di tmintaharga.mh_nomor_kalkulasi, melainkan tetap di tkalkulasi_hdr (relasi kal_mh_nomor).
+    // Kolom tmintaharga.mh_nomor_kalkulasi bersifat NOT NULL di DB, sehingga harus berupa string kosong jika tidak ada nomor kalkulasi Finance.
     const isNomorFinance = String(nomorKalkulasi || "").toUpperCase().startsWith("KAL-");
-    const mhNomorKalkulasi = (initialStatus === "DONE" && isNomorFinance) ? nomorKalkulasi : null;
+    const mhNomorKalkulasi =
+        initialStatus === "DONE" && isNomorFinance && nomorKalkulasi
+            ? String(nomorKalkulasi).trim()
+            : "";
     const mhDateKalkulasi = (initialStatus === "DONE" && isNomorFinance) ? (dateKalkulasi || null) : null;
 
     // Coba insert dengan kolom mh_workshop, fallback jika kolom belum ada di DB (ER_BAD_FIELD_ERROR)
