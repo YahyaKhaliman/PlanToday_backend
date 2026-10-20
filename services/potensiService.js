@@ -697,8 +697,14 @@ const getList = async ({
             customer_nama: r.cus_nama,
             pot_pen_nomor: r.pot_pen_nomor,
             pen_nomor: r.pot_pen_nomor,
-            mspk_nomor: r.m0 || r.pot_mspk_nomor || "",
-            pot_mspk_nomor: r.m0 || r.pot_mspk_nomor || "",
+            mspk_nomor:
+                r.tipe_sumber === "MAP"
+                    ? r.nomor_sumber || r.m0 || r.pot_mspk_nomor || ""
+                    : r.m0 || r.pot_mspk_nomor || "",
+            pot_mspk_nomor:
+                r.tipe_sumber === "MAP"
+                    ? r.nomor_sumber || r.m0 || r.pot_mspk_nomor || ""
+                    : r.m0 || r.pot_mspk_nomor || "",
             tipe_sumber: r.tipe_sumber,
             nomor_sumber: r.nomor_sumber,
             is_realisasi: isReal,
