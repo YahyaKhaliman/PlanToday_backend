@@ -327,7 +327,7 @@ const normalizePermintaanStatus = (value) =>
         .trim()
         .toUpperCase();
 
-const PERMINTAAN_STATUS_SELESAI_VALUES = ["SELESAI", "DONE"];
+const PERMINTAAN_STATUS_SELESAI_VALUES = ["DONE"];
 
 const isPermintaanStatusSelesai = (value) =>
     PERMINTAAN_STATUS_SELESAI_VALUES.includes(normalizePermintaanStatus(value));
@@ -1597,6 +1597,7 @@ const getMasterPermintaanHargaForPenawaran = async ({
         FROM tmintaharga m
         LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
         WHERE COALESCE(m.mh_sal_kode, '') = ?
+          AND UPPER(TRIM(COALESCE(m.mh_status, ''))) = 'DONE'
           ${customerSql}
           AND NOT EXISTS (
               SELECT 1
@@ -1641,6 +1642,7 @@ const getMasterPermintaanHargaForPenawaran = async ({
             LEFT JOIN tsales s ON s.sal_kode = m.mh_sal_kode
             WHERE m.mh_nomor = ?
               AND COALESCE(m.mh_sal_kode, '') = ?
+              AND UPPER(TRIM(COALESCE(m.mh_status, ''))) = 'DONE'
             LIMIT 1
             `,
             [selectedNomor, effectiveSalesKode],

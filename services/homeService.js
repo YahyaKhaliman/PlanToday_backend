@@ -261,7 +261,14 @@ const cariCustomer = async (search) => {
     return rows;
 };
 
-const createVisitPlan = async ({ cus_kode, user, tanggal_plan, note }) => {
+const createVisitPlan = async ({
+    cus_kode,
+    user,
+    tanggal_plan,
+    note,
+    latitude,
+    longitude,
+}) => {
     if (!cus_kode)
         return {
             status: 400,
@@ -351,10 +358,10 @@ const createVisitPlan = async ({ cus_kode, user, tanggal_plan, note }) => {
 
         const [ins] = await conn.query(
             `
-            INSERT INTO tkunjungan (cus_kode, user, note, tanggal_plan, realisasi)
-            VALUES (?, ?, ?, CONCAT(?, ' 00:00:00'), 'N')
+            INSERT INTO tkunjungan (cus_kode, user, note, tanggal_plan, realisasi, latitude, longitude)
+            VALUES (?, ?, ?, CONCAT(?, ' 00:00:00'), 'N', ?, ?)
             `,
-            [cus_kode, user, note, tanggal_plan],
+            [cus_kode, user, note, tanggal_plan, latitude, longitude],
         );
 
         await conn.commit();
@@ -389,6 +396,8 @@ const visitPlanById = async ({ user, tanggal, cus_kode }) => {
             k.note,
             k.catatan,
             k.realisasi,
+            k.latitude,
+            k.longitude,
             c.cus_nama AS cc_nama,
             c.cus_alamat AS cc_alamat,
             c.cus_kota AS cc_kota
@@ -406,7 +415,14 @@ const visitPlanById = async ({ user, tanggal, cus_kode }) => {
     return rows?.[0] || null;
 };
 
-const updateVisitPlan = async ({ id, tanggal_plan, note, catatan }) => {
+const updateVisitPlan = async ({
+    id,
+    tanggal_plan,
+    note,
+    catatan,
+    latitude,
+    longitude,
+}) => {
     if (!id) {
         return {
             status: 400,
@@ -501,10 +517,12 @@ const updateVisitPlan = async ({ id, tanggal_plan, note, catatan }) => {
         `UPDATE tkunjungan
         SET tanggal_plan = CONCAT(?, ' 00:00:00'),
             note = ?,
-            catatan = ?
+            catatan = ?,
+            latitude = COALESCE(?, latitude),
+            longitude = COALESCE(?, longitude)
         WHERE id = ?
         `,
-        [String(tanggal_plan), note ?? "", catatan ?? "", id],
+        [String(tanggal_plan), note ?? "", catatan ?? "", latitude, longitude, id],
     );
 
     if (result.affectedRows === 0) {

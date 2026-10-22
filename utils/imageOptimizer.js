@@ -34,11 +34,12 @@ async function ensureImageUnder500KB(filePath) {
 
         let quality = 80;
         let width = 1280;
-        let buffer = await fs.promises.readFile(filePath);
+        const initialBuffer = await fs.promises.readFile(filePath);
+        let buffer = initialBuffer;
 
         while (buffer.length > MAX_IMAGE_BYTES && quality >= 35) {
             try {
-                buffer = await sharp(filePath)
+                buffer = await sharp(initialBuffer)
                     .rotate() // Rotasi otomatis sesuai metadata EXIF kamera
                     .resize({ width, withoutEnlargement: true, fit: "inside" })
                     .jpeg({ quality, mozjpeg: true })

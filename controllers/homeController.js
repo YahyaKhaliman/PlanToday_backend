@@ -79,12 +79,16 @@ const createVisitPlan = async (req, res) => {
             .trim()
             .slice(0, 10);
         const note = String(req.body.note || "").trim();
+        const latitude = req.body.latitude != null ? req.body.latitude : null;
+        const longitude = req.body.longitude != null ? req.body.longitude : null;
 
         const result = await homeService.createVisitPlan({
             cus_kode,
             user,
             tanggal_plan,
             note,
+            latitude,
+            longitude,
         });
 
         return res.status(result.status).json(result.body);
@@ -117,7 +121,7 @@ const visitPlanById = async (req, res) => {
 
 const updateVisitPlan = async (req, res) => {
     const { id } = req.params;
-    const { tanggal_plan, note, catatan } = req.body;
+    const { tanggal_plan, note, catatan, latitude, longitude } = req.body;
 
     try {
         const result = await homeService.updateVisitPlan({
@@ -125,6 +129,8 @@ const updateVisitPlan = async (req, res) => {
             tanggal_plan,
             note,
             catatan,
+            latitude: latitude != null ? latitude : null,
+            longitude: longitude != null ? longitude : null,
         });
         return res.status(result.status).json(result.body);
     } catch (err) {
