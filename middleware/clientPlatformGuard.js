@@ -38,11 +38,11 @@ const clientPlatformGuard = (req, res, next) => {
         pathLower.includes("/auth/login") || pathLower.includes("/login");
     if (isLoginRoute) {
         const webUrl = process.env.WEB_APP_URL
-            ? ` di ${process.env.WEB_APP_URL}`
+            ? ` melalui alamat ${process.env.WEB_APP_URL}`
             : "";
         return res.status(403).json({
             success: false,
-            message: `Aplikasi PlanToday APK sudah tidak digunakan dan telah beralih ke versi Web. Silakan akses PlanToday melalui browser melalui alamat ${webUrl}.`,
+            message: `Aplikasi PlanToday APK sudah tidak digunakan dan telah beralih ke versi Web. Silakan akses PlanToday melalui browser${webUrl}.`,
             code: "MIGRATED_TO_WEB",
         });
     }
