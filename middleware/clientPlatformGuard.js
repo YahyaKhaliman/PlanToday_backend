@@ -31,12 +31,19 @@ const clientPlatformGuard = (req, res, next) => {
     }
 
     // 3. Jika dari React Native lama / Client non-Flutter:
-    // Izinkan login agar user lama tetap bisa masuk dan melihat riwayat data
-    if (pathLower.includes("/auth/login") || pathLower.includes("/login")) {
-        return next();
+    // Blokir login dan berikan pesan jelas bahwa aplikasi telah berpindah ke versi Web
+    const isLoginRoute =
+        pathLower.includes("/auth/login") || pathLower.includes("/login");
+    if (isLoginRoute) {
+        const webUrl = process.env.WEB_APP_URL ? ` di ${process.env.WEB_APP_URL}` : "";
+        return res.status(403).json({
+            success: false,
+            message: `Aplikasi PlanToday APK sudah tidak digunakan dan telah beralih ke versi Web. Silakan akses PlanToday melalui browser/Web${webUrl}.`,
+            code: "MIGRATED_TO_WEB",
+        });
     }
 
-    // Izinkan request GET (Read-Only) agar user tetap bisa melihat daftar & riwayat
+    // Izinkan request GET (Read-Only) agar pengguna lama yang masih memiliki sesi aktif tetap bisa melihat riwayat
     if (req.method === "GET") {
         return next();
     }
@@ -45,8 +52,8 @@ const clientPlatformGuard = (req, res, next) => {
     return res.status(403).json({
         success: false,
         message:
-            "Aplikasi PlanToday versi lama sudah tidak didukung untuk membuat atau mengubah data. Silakan beralih ke aplikasi PlanToday versi terbaru (Flutter).",
-        code: "APP_UPGRADE_REQUIRED",
+            "Aplikasi PlanToday versi lama sudah tidak didukung. Silakan gunakan PlanToday versi Web.",
+        code: "MIGRATED_TO_WEB",
     });
 };
 
