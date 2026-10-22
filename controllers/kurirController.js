@@ -1,4 +1,5 @@
 const kurirService = require("../services/kurirService");
+const { ensureImageUnder500KB } = require("../utils/imageOptimizer");
 
 function meta(req, extra = {}) {
     return {
@@ -608,6 +609,11 @@ const uploadPengirimanPhoto = async (req, res) => {
 
         if (!canAccessRow(req, existing)) {
             return forbidden(res, req);
+        }
+
+        // Pastikan ukuran foto pengiriman <= 500 KB sebelum disimpan
+        if (req.file && req.file.path) {
+            await ensureImageUnder500KB(req.file.path);
         }
 
         const relativePath = `/uploads/kiriman/${req.file.filename}`;

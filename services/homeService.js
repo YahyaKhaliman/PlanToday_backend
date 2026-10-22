@@ -3,6 +3,7 @@ const {
     canonicalSalesName,
     salesAliasMembers,
 } = require("../utils/salesIdentityResolver");
+const { ensureImageUnder500KB } = require("../utils/imageOptimizer");
 
 // Bangun klausa IN untuk mencocokkan user/karyawan ke semua alias nama sales.
 const salesNameInClause = (user, col) => {
@@ -766,6 +767,11 @@ const uploadVisitPhoto = async ({ id, file }) => {
                 message: "File foto tidak ditemukan (req.file kosong)",
             },
         };
+
+    // Pastikan ukuran foto maksimal 500 KB sebelum disimpan permanen
+    if (file.path) {
+        await ensureImageUnder500KB(file.path);
+    }
 
     const relativePath = `/uploads/visits/${file.filename}`;
     await db.query(`UPDATE tkunjungan SET foto = ? WHERE id = ?`, [

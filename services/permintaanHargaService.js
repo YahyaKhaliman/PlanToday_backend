@@ -3,6 +3,7 @@ const path = require("path");
 const sharp = require("sharp");
 const db = require("../config/dbPenawaran");
 const { UPLOAD_DIR } = require("../middleware/uploadPermintaanHarga");
+const { ensureImageUnder500KB } = require("../utils/imageOptimizer");
 const {
     resolveSalesIdentity,
     findActiveSalesByNameNormalized,
@@ -2609,14 +2610,7 @@ const uploadPermintaanHargaImage = async ({ nomor, slot, file, user }) => {
     }
 
     if (file && file.path) {
-        try {
-            const imgBuffer = await sharp(file.path)
-                .jpeg({ quality: 90, force: true })
-                .toBuffer();
-            await fs.promises.writeFile(file.path, imgBuffer);
-        } catch (sharpErr) {
-            console.error("[PermintaanHarga][Upload][SharpError]", sharpErr);
-        }
+        await ensureImageUnder500KB(file.path);
     }
 
     const baseUrl = buildImageBaseUrl();
@@ -2675,17 +2669,7 @@ const uploadPermintaanHargaImageInternal = async ({ nomor, slot, file }) => {
     }
 
     if (file && file.path) {
-        try {
-            const imgBuffer = await sharp(file.path)
-                .jpeg({ quality: 90, force: true })
-                .toBuffer();
-            await fs.promises.writeFile(file.path, imgBuffer);
-        } catch (sharpErr) {
-            console.error(
-                "[PermintaanHarga][Upload][Internal][SharpError]",
-                sharpErr,
-            );
-        }
+        await ensureImageUnder500KB(file.path);
     }
 
     const baseUrl = buildImageBaseUrl();

@@ -21,15 +21,19 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-    const ok = /^image\/(jpeg|jpg|png|webp)$/i.test(file.mimetype);
-    if (!ok) return cb(new Error('Tipe file harus gambar (jpg/png/webp)'), false);
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const isImageExt = ['.jpg', '.jpeg', '.png', '.webp'].includes(ext);
+    const isImageMime = /^image\/(jpeg|jpg|png|webp)$/i.test(file.mimetype);
+    if (!isImageMime && !isImageExt) {
+        return cb(new Error('Tipe file harus gambar (jpg/png/webp)'), false);
+    }
     cb(null, true);
 };
 
 const uploadVisit = multer({
     storage,
     fileFilter,
-    limits: { fileSize: 1 * 1024 * 1024 }, // 1MB
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
 module.exports = { uploadVisit, UPLOAD_DIR };
