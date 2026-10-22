@@ -23,7 +23,9 @@ const clientPlatformGuard = (req, res, next) => {
     }
 
     // 2. Cek Header Identitas Aplikasi Flutter
-    const clientHeader = String(req.headers["x-app-client"] || "").trim().toLowerCase();
+    const clientHeader = String(req.headers["x-app-client"] || "")
+        .trim()
+        .toLowerCase();
     const isFlutter = clientHeader === "plantoday-flutter";
 
     if (isFlutter) {
@@ -35,10 +37,12 @@ const clientPlatformGuard = (req, res, next) => {
     const isLoginRoute =
         pathLower.includes("/auth/login") || pathLower.includes("/login");
     if (isLoginRoute) {
-        const webUrl = process.env.WEB_APP_URL ? ` di ${process.env.WEB_APP_URL}` : "";
+        const webUrl = process.env.WEB_APP_URL
+            ? ` di ${process.env.WEB_APP_URL}`
+            : "";
         return res.status(403).json({
             success: false,
-            message: `Aplikasi PlanToday APK sudah tidak digunakan dan telah beralih ke versi Web. Silakan akses PlanToday melalui browser/Web${webUrl}.`,
+            message: `Aplikasi PlanToday APK sudah tidak digunakan dan telah beralih ke versi Web. Silakan akses PlanToday melalui browser melalui alamat ${webUrl}.`,
             code: "MIGRATED_TO_WEB",
         });
     }
