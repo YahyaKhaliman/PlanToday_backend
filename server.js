@@ -4,6 +4,7 @@ const cors = require("cors");
 const path = require("path");
 
 const requestLogger = require(path.join(__dirname, "middleware", "log"));
+const clientPlatformGuard = require("./middleware/clientPlatformGuard");
 
 const app = express();
 
@@ -36,6 +37,8 @@ app.use((req, res, next) => {
     if (ct.includes("multipart/form-data")) return next();
     return requestLogger(req, res, next);
 });
+
+app.use(clientPlatformGuard);
 
 app.get("/api-plantoday", (req, res) => {
     res.send("PlanToday Backend Running");

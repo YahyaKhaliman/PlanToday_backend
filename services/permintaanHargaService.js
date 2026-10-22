@@ -237,14 +237,15 @@ const createPermintaanHargaInTransaction = async ({
     if (payload.mh_status) {
         initialStatus = String(payload.mh_status).trim().toUpperCase();
         // Pengaman: Jika harga pengajuan 0 atau di bawah harga kalkulasi, status harus NEGO (tidak boleh DONE)
+        if (initialStatus === "DONE") {
+            initialStatus = "BELUM DIVERIFIKASI";
+        }
         if (hargaKalkulasi > 0 && (hargaPengajuan === 0 || hargaPengajuan < hargaKalkulasi)) {
-            if (initialStatus === "DONE") {
-                initialStatus = "NEGO";
-            }
+            initialStatus = "NEGO";
         }
     } else if (hargaKalkulasi > 0) {
         if (hargaPengajuan > 0 && hargaPengajuan >= hargaKalkulasi) {
-            initialStatus = "DONE";
+            initialStatus = "BELUM DIVERIFIKASI";
         } else {
             initialStatus = "NEGO";
         }
@@ -323,7 +324,7 @@ const createPermintaanHargaInTransaction = async ({
         // Pengecekan status: jika pengajuan sales < kalkulasi sistem atau bernilai 0 maka NEGO, jika >= maka DONE
         if (kalRpSistem > 0) {
             if (kalRpSales > 0 && kalRpSales >= kalRpSistem) {
-                initialStatus = "DONE";
+                initialStatus = "BELUM DIVERIFIKASI";
             } else {
                 initialStatus = "NEGO";
             }
@@ -1270,7 +1271,7 @@ const createPermintaanHargaInTransaction = async ({
                 salesKode,
                 String(payload.mh_nama || "").trim(),
                 toNumber(payload.mh_jmlorder, 0),
-                hargaPengajuan,
+                0, // mh_harga: simpan 0 (disimpan di tkalkulasi_hdr.kal_rpsales)
                 toNumber(payload.mh_budget, 0),
                 payload.mh_dateorder
                     ? normalizeDate(payload.mh_dateorder)
@@ -1293,7 +1294,7 @@ const createPermintaanHargaInTransaction = async ({
                 workshopGarmen,
                 initialStatus,
                 actor,
-                mhHargaKalkulasi,
+                0, // mh_harga_kalkulasi: simpan 0 (disimpan di tkalkulasi_hdr.kal_rpsistem),
                 String(payload.mh_ket_kalkulasi || "").trim(),
                 mhNomorKalkulasi,
                 mhDateKalkulasi,
@@ -1326,7 +1327,7 @@ const createPermintaanHargaInTransaction = async ({
                     salesKode,
                     String(payload.mh_nama || "").trim(),
                     toNumber(payload.mh_jmlorder, 0),
-                    hargaPengajuan,
+                    0, // mh_harga: simpan 0
                     toNumber(payload.mh_budget, 0),
                     payload.mh_dateorder
                         ? normalizeDate(payload.mh_dateorder)
@@ -1348,7 +1349,7 @@ const createPermintaanHargaInTransaction = async ({
                         .toUpperCase(),
                     initialStatus,
                     actor,
-                    mhHargaKalkulasi,
+                    0, // mh_harga_kalkulasi: simpan 0
                     String(payload.mh_ket_kalkulasi || "").trim(),
                     mhNomorKalkulasi,
                     mhDateKalkulasi,
@@ -1430,14 +1431,39 @@ const getPermintaanHargaList = async ({
             COALESCE(m.mh_cus_nama,'') AS customer,
             COALESCE(v.divisi,'') AS divisi,
             COALESCE(m.mh_jmlorder,0) AS jml_order,
-            COALESCE(m.mh_harga, 0) AS mh_harga,
-            COALESCE(m.mh_harga, 0) AS harga,
-            COALESCE(m.mh_harga_kalkulasi,0) AS harga_kalkulasi,
+            COALESCE(
+                CASE 
+                    WHEN k.kal_rpsales > 0 THEN 
+                        IF(k.kal_ppn > 0, ROUND(k.kal_rpsales * (1 + k.kal_ppn / 100)), ROUND(k.kal_rpsales))
+                    ELSE NULL
+                END,
+                m.mh_harga, 
+                0
+            ) AS mh_harga,
+            COALESCE(
+                CASE 
+                    WHEN k.kal_rpsales > 0 THEN 
+                        IF(k.kal_ppn > 0, ROUND(k.kal_rpsales * (1 + k.kal_ppn / 100)), ROUND(k.kal_rpsales))
+                    ELSE NULL
+                END,
+                m.mh_harga, 
+                0
+            ) AS harga,
+            COALESCE(
+                CASE 
+                    WHEN k.kal_rpsistem > 0 THEN 
+                        IF(k.kal_ppn > 0, ROUND(k.kal_rpsistem * (1 + k.kal_ppn / 100)), ROUND(k.kal_rpsistem))
+                    ELSE NULL
+                END,
+                m.mh_harga_kalkulasi, 
+                0
+            ) AS harga_kalkulasi,
             COALESCE(m.mh_status,'') AS status,
             COALESCE(m.mh_ket_kalkulasi,'') AS ket_kalkulasi,
             COALESCE(m.user_create,'') AS user_create
         FROM tmintaharga m
         LEFT JOIN tdivisi v ON v.kode = m.mh_divisi
+        LEFT JOIN kalkulasi.tkalkulasi_hdr k ON k.kal_mh_nomor = m.mh_nomor
         WHERE ${where.join(" AND ")}
         ORDER BY m.mh_nomor DESC
         LIMIT ? OFFSET ?
@@ -1983,6 +2009,47 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
                 dtlOngkirErr.message,
             );
         }
+
+        // Sinkronisasi kal_rpsales, kal_rpsistem, kal_ppn ke tkalkulasi_hdr saat edit
+        try {
+            const updKetKalkulasi = String(body.mh_ket_kalkulasi || rows[0].mh_ket_kalkulasi || "").trim();
+            const updIsIncPpn = /INC\s*PPN/i.test(updKetKalkulasi) || body.is_ppn === true || body.is_inc_ppn === true;
+            const updKalPpn = body.kal_ppn !== undefined && body.kal_ppn !== null && body.kal_ppn !== "" 
+                ? toNumber(body.kal_ppn, 0) 
+                : (updIsIncPpn ? 11 : 0);
+            const updPpnMultiplier = updKalPpn > 0 ? (1 + updKalPpn / 100) : 1;
+            const updHargaKalkulasi = toNumber(body.mh_harga_kalkulasi, 0);
+            const updHargaPengajuan = toNumber(body.mh_harga, 0);
+
+            if (updHargaKalkulasi > 0 || updHargaPengajuan > 0) {
+                const updKalRpSistem = updKalPpn > 0 ? Math.round(updHargaKalkulasi / updPpnMultiplier) : updHargaKalkulasi;
+                const updKalRpSales = updHargaPengajuan > 0
+                    ? (updKalPpn > 0 ? Math.round(updHargaPengajuan / updPpnMultiplier) : updHargaPengajuan)
+                    : 0;
+
+                await db.query(
+                    `UPDATE kalkulasi.tkalkulasi_hdr 
+                     SET kal_rpsales = ?, kal_rpsistem = ?, kal_ppn = ?, kal_ket = ?, user_modified = ?, date_modified = NOW()
+                     WHERE kal_nomor = ? OR kal_mh_nomor = ?`,
+                    [updKalRpSales, updKalRpSistem, updKalPpn, updKetKalkulasi, actor, existingNomorKal, nomor]
+                );
+
+                // Update status di tmintaharga jika status sebelumnya belum final
+                let updNewStatus = curStatus;
+                if (updKalRpSistem > 0) {
+                    if (updKalRpSales > 0 && updKalRpSales >= updKalRpSistem) {
+                        updNewStatus = "BELUM DIVERIFIKASI";
+                    } else {
+                        updNewStatus = "NEGO";
+                    }
+                }
+                if (updNewStatus !== curStatus && ["BELUM", "NEGO", "DONE", "BELUM DIVERIFIKASI"].includes(curStatus)) {
+                    await db.query(`UPDATE tmintaharga SET mh_status = ? WHERE mh_nomor = ?`, [updNewStatus, nomor]);
+                }
+            }
+        } catch (hdrSyncErr) {
+            console.warn("[PermintaanHarga][UpdateHdrSync][Warn]", hdrSyncErr.message);
+        }
     }
 
     // workshop garmen untuk update (hanya divisi 4) - default MEDIUM (P01)
@@ -2050,7 +2117,7 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
                 updateSalesKode || String(rows[0].mh_sal_kode || "").trim(),
                 String(body.mh_nama || "").trim(),
                 toNumber(body.mh_jmlorder, 0),
-                toNumber(body.mh_harga, 0),
+                0, // mh_harga: simpan 0
                 toNumber(body.mh_budget, 0),
                 normalizeDate(body.mh_dateorder),
                 updateKain,
@@ -2069,7 +2136,7 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
                     .trim()
                     .toUpperCase(),
                 updWorkshop,
-                toNumber(body.mh_harga_kalkulasi, 0),
+                0, // mh_harga_kalkulasi: simpan 0,
                 String(body.mh_ket_kalkulasi || "").trim(),
                 actor,
                 nomor,
@@ -2131,7 +2198,7 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
                 )
                     .trim()
                     .toUpperCase(),
-                toNumber(body.mh_harga_kalkulasi, 0),
+                0, // mh_harga_kalkulasi: simpan 0,
                 String(body.mh_ket_kalkulasi || "").trim(),
                 actor,
                 nomor,
@@ -2885,6 +2952,7 @@ const getPermintaanHargaStatusCounts = async ({
 
     const statusMap = {
         BELUM: 0,
+        "BELUM DIVERIFIKASI": 0,
         MINTA: 0,
         WAIT: 0,
         NEGO: 0,
