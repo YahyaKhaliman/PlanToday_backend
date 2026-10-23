@@ -21,10 +21,10 @@ const getTrackingPenawaranList = async ({
         searchSql += `
           AND (
               h.pen_nomor LIKE ?
+              OR COALESCE(c.cus_nama, '') LIKE ?
+              OR COALESCE(d.pend_nama_barang, '') LIKE ?
               OR COALESCE(m.mspk_nomor, '') LIKE ?
               OR COALESCE(sp.spk_nomor, '') LIKE ?
-              OR COALESCE(m.mspk_keterangan, '') LIKE ?
-              OR COALESCE(sp.spk_keterangan, '') LIKE ?
           )`;
         params.push(like, like, like, like, like);
     }
@@ -53,8 +53,7 @@ const getTrackingPenawaranList = async ({
         ? ""
         : "COALESCE(h.pen_sal_kode, '') = ?\n              AND ";
 
-    const [rows] = await db.query(
-        `
+    const mainQuerySql = `
         SELECT
             h.pen_nomor AS no_penawaran,
             DATE_FORMAT(h.pen_tanggal, '%Y-%m-%d') AS tanggal_penawaran,
@@ -83,30 +82,7 @@ const getTrackingPenawaranList = async ({
         LEFT JOIN tmemospk m
             ON m.mspk_pen_nomor = h.pen_nomor
            AND m.mspk_pen_id = d.pend_id
-        LEFT JOIN (
-            SELECT 
-                spk_pen_nomor,
-                spk_pen_id,
-                GROUP_CONCAT(DISTINCT spk_nomor SEPARATOR ', ') AS spk_nomor,
-                MAX(spk_nama) AS spk_nama,
-                MIN(spk_tanggal) AS spk_tanggal,
-                MAX(spk_dateline) AS spk_dateline,
-                MAX(spk_divisi) AS spk_divisi,
-                MAX(spk_perush_kode) AS spk_perush_kode,
-                MAX(spk_cus_kode) AS spk_cus_kode,
-                MAX(spk_workshop) AS spk_workshop,
-                MAX(spk_statuskerja) AS spk_statuskerja,
-                GROUP_CONCAT(DISTINCT spk_keterangan SEPARATOR '\n') AS spk_keterangan,
-                MAX(spk_pending) AS spk_pending,
-                MAX(spk_close) AS spk_close,
-                MAX(user_create) AS user_create,
-                MAX(user_modified) AS user_modified,
-                MAX(date_create) AS date_create,
-                MAX(date_modified) AS date_modified
-            FROM tspk
-            WHERE COALESCE(spk_pen_nomor, '') <> ''
-            GROUP BY spk_pen_nomor, spk_pen_id
-        ) sp
+        LEFT JOIN tspk sp
             ON sp.spk_pen_nomor = h.pen_nomor
            AND sp.spk_pen_id = d.pend_id
         WHERE ${ownerFilterSql}h.pen_tanggal >= ?
@@ -115,27 +91,27 @@ const getTrackingPenawaranList = async ({
         GROUP BY h.pen_nomor, h.pen_tanggal, c.cus_nama, s.sal_nama
         ${havingSql}
         ORDER BY h.pen_tanggal DESC, h.pen_nomor DESC
-        `,
-        params,
-    );
+        `;
 
     const baseParams = [startDate, endDate];
     if (!managerRole) {
         baseParams.unshift(authSalesKode);
     }
 
-    const [filterRows] = await db.query(
-        `
-        SELECT 
+    const filterQuerySql = `
+        SELECT DISTINCT
             COALESCE(s.sal_nama, '') AS sales,
             COALESCE(c.cus_nama, '') AS customer
         FROM tpenawaran_hdr h
         LEFT JOIN tsales s ON s.sal_kode = h.pen_sal_kode
         LEFT JOIN tcustomer c ON c.cus_kode = h.pen_cus_kode
         WHERE ${ownerFilterSql}h.pen_tanggal >= ? AND h.pen_tanggal <= ?
-        `,
-        baseParams,
-    );
+    `;
+
+    const [[rows], [filterRows]] = await Promise.all([
+        db.query(mainQuerySql, params),
+        db.query(filterQuerySql, baseParams),
+    ]);
 
     const availableSales = Array.from(
         new Set(filterRows.map((r) => r.sales).filter(Boolean)),
@@ -218,7 +194,7 @@ const getTrackingPenawaranDetailByNoPenawaran = async ({
                 MAX(date_create) AS date_create,
                 MAX(date_modified) AS date_modified
             FROM tspk
-            WHERE COALESCE(spk_pen_nomor, '') <> ''
+            WHERE spk_pen_nomor = ?
             GROUP BY spk_pen_nomor, spk_pen_id
         ) sp
             ON sp.spk_pen_nomor = h.pen_nomor
@@ -227,7 +203,9 @@ const getTrackingPenawaranDetailByNoPenawaran = async ({
           ${ownerFilterSql}
         ORDER BY d.pend_urutan, d.pend_id
         `,
-        managerRole ? [noPenawaran] : [noPenawaran, authSalesKode],
+        managerRole
+            ? [noPenawaran, noPenawaran]
+            : [noPenawaran, noPenawaran, authSalesKode],
     );
 
     if (!rows || rows.length === 0) {
@@ -346,15 +324,7 @@ const getTrackingPenawaranStatusCounts = async ({
             LEFT JOIN tmemospk m
                 ON m.mspk_pen_nomor = h.pen_nomor
                AND m.mspk_pen_id = d.pend_id
-            LEFT JOIN (
-                SELECT 
-                    spk_pen_nomor,
-                    spk_pen_id,
-                    GROUP_CONCAT(DISTINCT spk_nomor SEPARATOR ', ') AS spk_nomor
-                FROM tspk
-                WHERE COALESCE(spk_pen_nomor, '') <> ''
-                GROUP BY spk_pen_nomor, spk_pen_id
-            ) sp
+            LEFT JOIN tspk sp
                 ON sp.spk_pen_nomor = h.pen_nomor
                AND sp.spk_pen_id = d.pend_id
             WHERE ${ownerFilterSql}h.pen_tanggal >= ?

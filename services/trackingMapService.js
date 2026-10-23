@@ -52,8 +52,7 @@ const getTrackingMapList = async ({
         filterSjMapSql = "AND sh.SJ_Nomor IS NOT NULL";
     }
 
-    const [rows] = await db.query(
-        `
+    const mainQuerySql = `
         SELECT
             COALESCE(m.mspk_nomor, '') AS no_map,
             COALESCE(NULLIF(cm.cus_nama, ''), COALESCE(ch.cus_nama, '')) AS customer,
@@ -102,9 +101,7 @@ const getTrackingMapList = async ({
             cm.cus_nama,
             cm.cus_alamat
         ORDER BY m.mspk_tanggal DESC, m.mspk_nomor DESC
-        `,
-        params,
-    );
+    `;
 
     const filterParams = [startDate, endDate];
     let filterOwnerSql = "";
@@ -114,8 +111,7 @@ const getTrackingMapList = async ({
         filterParams.push(authSalesKode);
     }
 
-    const [filterRows] = await db.query(
-        `
+    const filterQuerySql = `
         SELECT DISTINCT
             COALESCE(s.sal_nama, '') AS sales
         FROM tmemospk m
@@ -124,9 +120,13 @@ const getTrackingMapList = async ({
         WHERE m.mspk_tanggal >= ? AND m.mspk_tanggal <= ?
           AND COALESCE(m.mspk_divisi, '') NOT IN ('3', '6')
           ${filterOwnerSql}
-        `,
-        filterParams,
-    );
+    `;
+
+    const [[rows], [filterRows]] = await Promise.all([
+        db.query(mainQuerySql, params),
+        db.query(filterQuerySql, filterParams),
+    ]);
+
     const availableSales = Array.from(
         new Set(filterRows.map((r) => r.sales).filter(Boolean)),
     ).sort();
