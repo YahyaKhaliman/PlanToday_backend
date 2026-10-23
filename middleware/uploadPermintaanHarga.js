@@ -53,7 +53,7 @@ const storage = multer.diskStorage({
     filename: (req, file, cb) => {
         const nomor = String(req.params.nomor || "")
             .trim()
-            .replace(/[^A-Z0-9\-_/]/gi, "_");
+            .replace(/[^A-Z0-9.\-_/]/gi, "_");
         const slot = String(req.params.slot || "1").trim();
         const suffix = slot === "2" ? "-2" : "";
         cb(null, `${nomor}${suffix}.jpg`);

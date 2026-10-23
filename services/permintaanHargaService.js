@@ -2595,16 +2595,14 @@ const uploadPermintaanHargaImage = async ({ nomor, slot, file, user }) => {
         };
     }
 
-    if (
-        String(rows[0].mh_status || "")
-            .trim()
-            .toUpperCase() !== "BELUM"
-    ) {
+    const curStatus = String(rows[0].mh_status || "").trim().toUpperCase();
+    const allowedStatuses = new Set(["BELUM", "BELUM DIVERIFIKASI", "NEGO", "WAIT", "MINTA"]);
+    if (!allowedStatuses.has(curStatus)) {
         return {
             status: 409,
             body: {
                 success: false,
-                message: "Upload gambar hanya diizinkan untuk status BELUM",
+                message: `Upload gambar tidak diizinkan untuk status ${curStatus}`,
             },
         };
     }
@@ -2734,16 +2732,14 @@ const uploadPermintaanHargaImageBase64 = async ({
         };
     }
 
-    if (
-        String(rows[0].mh_status || "")
-            .trim()
-            .toUpperCase() !== "BELUM"
-    ) {
+    const curStatus = String(rows[0].mh_status || "").trim().toUpperCase();
+    const allowedStatuses = new Set(["BELUM", "BELUM DIVERIFIKASI", "NEGO", "WAIT", "MINTA"]);
+    if (!allowedStatuses.has(curStatus)) {
         return {
             status: 409,
             body: {
                 success: false,
-                message: "Upload gambar hanya diizinkan untuk status BELUM",
+                message: `Upload gambar tidak diizinkan untuk status ${curStatus}`,
             },
         };
     }
@@ -2871,16 +2867,14 @@ const deletePermintaanHargaImage = async ({ nomor, slot, user }) => {
             },
         };
     }
-    if (
-        String(rows[0].mh_status || "")
-            .trim()
-            .toUpperCase() !== "BELUM"
-    ) {
+    const curStatus = String(rows[0].mh_status || "").trim().toUpperCase();
+    const allowedStatuses = new Set(["BELUM", "BELUM DIVERIFIKASI", "NEGO", "WAIT", "MINTA"]);
+    if (!allowedStatuses.has(curStatus)) {
         return {
             status: 409,
             body: {
                 success: false,
-                message: "Hapus gambar hanya diizinkan untuk status BELUM",
+                message: `Hapus gambar tidak diizinkan untuk status ${curStatus}`,
             },
         };
     }
