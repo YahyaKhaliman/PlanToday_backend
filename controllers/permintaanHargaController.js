@@ -241,20 +241,10 @@ const uploadPermintaanHargaImageBase64 = async (req, res) => {
 };
 
 const createPermintaanHargaCustomer = async (req, res) => {
-    try {
-        const result =
-            await permintaanHargaService.createPermintaanHargaCustomer({
-                body: req.body || {},
-                user: req.user || {},
-            });
-        return res.status(result.status).json(result.body);
-    } catch (err) {
-        return res.status(500).json({
-            success: false,
-            message:
-                err.sqlMessage || err.message || "Gagal menambahkan customer",
-        });
-    }
+    return res.status(403).json({
+        success: false,
+        message: "Fitur buat data customer baru telah dinonaktifkan.",
+    });
 };
 
 const deletePermintaanHargaImage = async (req, res) => {

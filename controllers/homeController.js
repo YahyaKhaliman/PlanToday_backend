@@ -7,32 +7,17 @@ function getPublicBaseUrl(req) {
 }
 
 const calonCustomer = async (req, res) => {
-    try {
-        const result = await homeService.calonCustomer(req.body || {});
-        return res.status(result.status).json(result.body);
-    } catch (err) {
-        console.error(err);
-        return res.status(500).json({
-            success: false,
-            message: "Gagal menyimpan calon customer",
-        });
-    }
+    return res.status(403).json({
+        success: false,
+        message: "Fitur tambah data customer baru telah dinonaktifkan.",
+    });
 };
 
 const updateCalonCustomerByKode = async (req, res) => {
-    try {
-        const cc_kode = String(req.params.cc_kode || "").trim();
-        const result = await homeService.updateCalonCustomerByKode({
-            cc_kode,
-            body: req.body || {},
-        });
-        return res.status(result.status).json(result.body);
-    } catch (err) {
-        console.error("UPDATE CUSTOMER ERROR:", err);
-        return res
-            .status(500)
-            .json({ success: false, message: err.sqlMessage || err.message });
-    }
+    return res.status(403).json({
+        success: false,
+        message: "Fitur edit data customer telah dinonaktifkan.",
+    });
 };
 
 const getCabang = async (req, res) => {

@@ -59,17 +59,26 @@ const isSalesUser = (user) =>
         .trim()
         .toUpperCase() === "SALES";
 
-const isManagerUser = (user) =>
-    String(user?.jabatan || "")
-        .trim()
-        .toUpperCase() === "MANAGER";
+const isManagerUser = (user) => {
+    const jab = String(user?.jabatan || "").trim().toUpperCase();
+    return jab.split(/[\s/_-]+/).includes("MANAGER");
+};
 
 const isOwnedBySalesKode = (user, row = {}) => {
     const authSalesKode = String(user?.sales_kode || "").trim();
     const rowSalesKode = String(
         row?.mh_sal_kode || row?.pen_sal_kode || "",
     ).trim();
-    return Boolean(authSalesKode) && rowSalesKode === authSalesKode;
+    const authNama = String(user?.nama || "").trim().toUpperCase();
+    const rowUserCreate = String(row?.user_create || "").trim().toUpperCase();
+
+    if (authSalesKode && rowSalesKode && authSalesKode === rowSalesKode) {
+        return true;
+    }
+    if (authNama && rowUserCreate && authNama === rowUserCreate) {
+        return true;
+    }
+    return false;
 };
 
 const resolveActor = (user, body) =>
@@ -1635,6 +1644,15 @@ const getPermintaanHargaDetail = async ({
             aksesoriesRows = aRows || [];
         } catch (e) {}
 
+        let ctkRows = [];
+        try {
+            const [cRowsGrid] = await db.query(
+                `SELECT * FROM kalkulasi.tkalkulasi_ctk WHERE kc_nomor = ? ORDER BY kc_nourut ASC`,
+                [kalNomor],
+            );
+            ctkRows = cRowsGrid || [];
+        } catch (e) {}
+
         try {
             const [cRows] = await db.query(
                 `SELECT * FROM kalkulasi.tkalkulasi_cetak WHERE kald_nomor = ? LIMIT 1`,
@@ -1749,6 +1767,12 @@ const getPermintaanHargaDetail = async ({
                 ka_aksesories: a.ka_aksesories,
                 ka_biaya: Number(a.ka_biaya) || 0,
                 ka_nourut: Number(a.ka_nourut) || 0,
+            })),
+            ctk_list: (ctkRows || []).map((c) => ({
+                kc_nomor: c.kc_nomor,
+                kc_ket: c.kc_ket,
+                kc_biaya: Number(c.kc_biaya) || 0,
+                kc_nourut: Number(c.kc_nourut) || 0,
             })),
             cetak: cetak
                 ? {
@@ -1911,17 +1935,23 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             status: 403,
             body: {
                 success: false,
-                message: "Tidak berhak mengubah data ini",
+                message: "Hanya dapat mengubah permintaan harga milik sendiri",
             },
         };
     }
-    const curStatus = String(rows[0].mh_status || "").toUpperCase();
-    if (!["BELUM", "DONE", "NEGO"].includes(curStatus)) {
+    const curStatus = String(rows[0].mh_status || "").trim().toUpperCase();
+    const editableStatuses = [
+        "BELUM",
+        "NEGO",
+        "BELUM DIVERIFIKASI",
+        "BELUM_DIVERIFIKASI",
+    ];
+    if (!editableStatuses.includes(curStatus)) {
         return {
             status: 409,
             body: {
                 success: false,
-                message: `Status ${curStatus} tidak dapat diubah`,
+                message: `Status ${curStatus} tidak dapat diubah (hanya status BELUM, NEGO, atau BELUM DIVERIFIKASI yang dapat diedit)`,
             },
         };
     }
@@ -2050,6 +2080,134 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             }
         } catch (hdrSyncErr) {
             console.warn("[PermintaanHarga][UpdateHdrSync][Warn]", hdrSyncErr.message);
+        }
+
+        // Sinkronkan garmen_tambahan dan garmen_cetak jika diedit
+        if (updateDivisiNum === 4 || body.garmen_tambahan !== undefined || body.garmen_cetak !== undefined) {
+            try {
+                // 1. Sinkronkan Aksesoris / Tambahan
+                if (body.garmen_tambahan !== undefined) {
+                    await db.query("DELETE FROM kalkulasi.tkalkulasi_aksesories WHERE ka_nomor = ?", [existingNomorKal]);
+                    let tambahanItems = body.garmen_tambahan || [];
+                    if (typeof tambahanItems === "string") {
+                        try { tambahanItems = JSON.parse(tambahanItems); } catch (e) { tambahanItems = []; }
+                    }
+                    if (Array.isArray(tambahanItems) && tambahanItems.length > 0) {
+                        const aksValues = tambahanItems.map((t, idx) => [
+                            existingNomorKal,
+                            t.ket || t.nama || "",
+                            Number(t.tarif) || 0,
+                            idx + 1,
+                        ]);
+                        await db.query(
+                            `INSERT INTO kalkulasi.tkalkulasi_aksesories (ka_nomor, ka_aksesories, ka_biaya, ka_nourut) VALUES ?`,
+                            [aksValues],
+                        );
+                    }
+                }
+
+                // 2. Sinkronkan Cetak (tkalkulasi_ctk dan tabel cetak masing-masing)
+                if (body.garmen_cetak !== undefined) {
+                    await db.query("DELETE FROM kalkulasi.tkalkulasi_ctk WHERE kc_nomor = ?", [existingNomorKal]);
+                    await db.query("DELETE FROM kalkulasi.tkalkulasi_cetak WHERE kald_nomor = ?", [existingNomorKal]);
+                    await db.query("DELETE FROM kalkulasi.tkalkulasi_sublim WHERE kald_nomor = ?", [existingNomorKal]);
+                    await db.query("DELETE FROM kalkulasi.tkalkulasi_dtf WHERE kald_nomor = ?", [existingNomorKal]);
+                    await db.query("DELETE FROM kalkulasi.tkalkulasi_bordir WHERE kald_nomor = ?", [existingNomorKal]);
+
+                    let cetakItems = body.garmen_cetak || [];
+                    if (typeof cetakItems === "string") {
+                        try { cetakItems = JSON.parse(cetakItems); } catch (e) { cetakItems = []; }
+                    }
+                    if (!Array.isArray(cetakItems)) cetakItems = [];
+
+                    if (cetakItems.length > 0) {
+                        const ctkValues = cetakItems.map((c, idx) => {
+                            const j = String(c.jenis || "").toUpperCase().trim();
+                            let k = String(c.ket || c.nama || "").trim();
+                            if (j && !k.toUpperCase().startsWith(j)) {
+                                k = `${j} ${k}`.trim();
+                            }
+                            return [
+                                existingNomorKal,
+                                k || j || "CETAK",
+                                Number(c.biaya) || 0,
+                                idx + 1,
+                            ];
+                        });
+                        await db.query(
+                            `INSERT INTO kalkulasi.tkalkulasi_ctk (kc_nomor, kc_ket, kc_biaya, kc_nourut) VALUES ?`,
+                            [ctkValues],
+                        );
+
+                        // Agregasi ke tabel spesifik
+                        let totalSablon = 0;
+                        let totalSublim = 0;
+                        let dtfItem = null;
+                        let bordirItem = null;
+
+                        const [dtfBordirMasterRows] = await db.query(
+                            `SELECT mhb_jenis, COALESCE(mhb_cm, 0) AS mhb_cm FROM tmintaharga_biaya WHERE mhb_jenis IN ('DTF', 'BORDIR')`,
+                        );
+                        const dbDtfCm = Number(dtfBordirMasterRows?.find((r) => r.mhb_jenis === "DTF")?.mhb_cm) || 25;
+                        const dbBordirCm = Number(dtfBordirMasterRows?.find((r) => r.mhb_jenis === "BORDIR")?.mhb_cm) || 90;
+
+                        cetakItems.forEach((c) => {
+                            const j = String(c.jenis || "").toUpperCase().trim();
+                            const b = Number(c.biaya) || 0;
+                            if (j === "SABLON") {
+                                totalSablon += b;
+                            } else if (j === "SUBLIM") {
+                                totalSublim += b;
+                            } else if (j === "DTF") {
+                                let p = Number(c.panjang) || 0;
+                                let l = Number(c.lebar) || 0;
+                                let cm = dbDtfCm;
+                                if ((!p || !l) && c.ket) {
+                                    const m = String(c.ket).match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
+                                    if (m) { p = Number(m[1]) || 0; l = Number(m[2]) || 0; }
+                                }
+                                if (!dtfItem) { dtfItem = { cm, p, l, biaya: b }; } else { dtfItem.biaya += b; }
+                            } else if (j === "BORDIR") {
+                                let p = Number(c.panjang) || 0;
+                                let l = Number(c.lebar) || 0;
+                                let cm = dbBordirCm;
+                                if ((!p || !l) && c.ket) {
+                                    const m = String(c.ket).match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
+                                    if (m) { p = Number(m[1]) || 0; l = Number(m[2]) || 0; }
+                                }
+                                if (!bordirItem) { bordirItem = { cm, p, l, biaya: b }; } else { bordirItem.biaya += b; }
+                            }
+                        });
+
+                        if (totalSablon > 0) {
+                            await db.query(
+                                `INSERT INTO kalkulasi.tkalkulasi_cetak (kald_nomor, kald_rpcetak) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpcetak = VALUES(kald_rpcetak)`,
+                                [existingNomorKal, totalSablon],
+                            );
+                        }
+                        if (totalSublim > 0) {
+                            await db.query(
+                                `INSERT INTO kalkulasi.tkalkulasi_sublim (kald_nomor, kald_rpsublim) VALUES (?, ?) ON DUPLICATE KEY UPDATE kald_rpsublim = VALUES(kald_rpsublim)`,
+                                [existingNomorKal, totalSublim],
+                            );
+                        }
+                        if (dtfItem && dtfItem.biaya > 0) {
+                            await db.query(
+                                `INSERT INTO kalkulasi.tkalkulasi_dtf (kald_nomor, kald_cmdtf, kald_dtfp1, kald_dtfl1, kald_rpdtf) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE kald_cmdtf = VALUES(kald_cmdtf), kald_dtfp1 = VALUES(kald_dtfp1), kald_dtfl1 = VALUES(kald_dtfl1), kald_rpdtf = VALUES(kald_rpdtf)`,
+                                [existingNomorKal, dtfItem.cm, dtfItem.p, dtfItem.l, dtfItem.biaya],
+                            );
+                        }
+                        if (bordirItem && bordirItem.biaya > 0) {
+                            await db.query(
+                                `INSERT INTO kalkulasi.tkalkulasi_bordir (kald_nomor, kald_cmbordir, kald_bordirp1, kald_bordirl1, kald_rpbordir) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE kald_cmbordir = VALUES(kald_cmbordir), kald_bordirp1 = VALUES(kald_bordirp1), kald_bordirl1 = VALUES(kald_bordirl1), kald_rpbordir = VALUES(kald_rpbordir)`,
+                                [existingNomorKal, bordirItem.cm, bordirItem.p, bordirItem.l, bordirItem.biaya],
+                            );
+                        }
+                    }
+                }
+            } catch (syncDetailErr) {
+                console.warn("[PermintaanHarga][UpdateDetailSync][Warn]", syncDetailErr.message);
+            }
         }
     }
 
