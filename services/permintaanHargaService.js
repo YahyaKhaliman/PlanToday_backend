@@ -243,11 +243,12 @@ const createPermintaanHargaInTransaction = async ({
     const hargaKalkulasi = toNumber(payload.mh_harga_kalkulasi, 0);
     let hargaPengajuan = toNumber(payload.mh_harga, 0);
     let initialStatus = "BELUM";
+    const isAutoDoneDivisi = [1, 5].includes(divisiNum);
 
     if (payload.mh_status) {
         initialStatus = String(payload.mh_status).trim().toUpperCase();
         // Pengaman: Jika harga pengajuan 0 atau di bawah harga kalkulasi, status harus NEGO (tidak boleh DONE)
-        if (initialStatus === "DONE") {
+        if (initialStatus === "DONE" && !isAutoDoneDivisi) {
             initialStatus = "BELUM DIVERIFIKASI";
         }
         if (hargaKalkulasi > 0 && (hargaPengajuan === 0 || hargaPengajuan < hargaKalkulasi)) {
@@ -255,7 +256,7 @@ const createPermintaanHargaInTransaction = async ({
         }
     } else if (hargaKalkulasi > 0) {
         if (hargaPengajuan > 0 && hargaPengajuan >= hargaKalkulasi) {
-            initialStatus = "BELUM DIVERIFIKASI";
+            initialStatus = isAutoDoneDivisi ? "DONE" : "BELUM DIVERIFIKASI";
         } else {
             initialStatus = "NEGO";
         }
@@ -331,10 +332,11 @@ const createPermintaanHargaInTransaction = async ({
             hargaPengajuan = 0;
         }
 
-        // Pengecekan status: jika pengajuan sales < kalkulasi sistem atau bernilai 0 maka NEGO, jika >= maka DONE
+        // Pengecekan status: jika pengajuan sales < kalkulasi sistem atau bernilai 0 maka NEGO.
+        // Jika >= kalkulasi sistem: status DONE khusus divisi 1 (Spanduk) & 5 (MMT), atau BELUM DIVERIFIKASI untuk divisi lain.
         if (kalRpSistem > 0) {
             if (kalRpSales > 0 && kalRpSales >= kalRpSistem) {
-                initialStatus = "BELUM DIVERIFIKASI";
+                initialStatus = isAutoDoneDivisi ? "DONE" : "BELUM DIVERIFIKASI";
             } else {
                 initialStatus = "NEGO";
             }
@@ -2067,9 +2069,10 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
 
                 // Update status di tmintaharga jika status sebelumnya belum final
                 let updNewStatus = curStatus;
+                const isAutoDoneUpdDivisi = [1, 5].includes(toNumber(body.mh_divisi || rows[0].mh_divisi, 0));
                 if (updKalRpSistem > 0) {
                     if (updKalRpSales > 0 && updKalRpSales >= updKalRpSistem) {
-                        updNewStatus = "BELUM DIVERIFIKASI";
+                        updNewStatus = isAutoDoneUpdDivisi ? "DONE" : "BELUM DIVERIFIKASI";
                     } else {
                         updNewStatus = "NEGO";
                     }
