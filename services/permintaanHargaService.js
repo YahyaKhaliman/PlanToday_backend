@@ -3484,7 +3484,9 @@ const getKalkulasiOptions = async () => {
             mhmt_material AS material, 
             mhmt_harga AS harga 
          FROM tmintaharga_mmt_tambahan 
-         WHERE mhmt_aktif = 1 AND mhmt_kategori != 'SELONGSONG'
+         WHERE mhmt_aktif = 1 
+           AND mhmt_kategori NOT LIKE '%SELONGSONG%' 
+           AND mhmt_kode NOT LIKE '%SELONGSONG%'
          ORDER BY mhmt_id`,
     );
 
@@ -3722,7 +3724,9 @@ const calculateSpanduk = async ({
             mhsp_id AS id, 
             mhsp_qmin AS qmin, 
             mhsp_qmax AS qmax, 
-            mhsp_harga AS harga 
+            mhsp_harga AS harga,
+            mhsp_harga AS up,
+            mhsp_harga AS tarif 
          FROM tmintaharga_spanduk 
          WHERE mhsp_metode = ? AND mhsp_lebar = ? AND mhsp_jenis_kain = ? 
          ORDER BY mhsp_qmin`,
