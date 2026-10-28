@@ -1243,26 +1243,36 @@ const createPermintaanHargaInTransaction = async ({
         else workshopGarmen = "P01";
     }
 
-    // Pada tmintaharga, mh_harga_kalkulasi dan mh_nomor_kalkulasi hanya diisi jika status DONE
-    let calculatedMhHargaKalkulasi = 0;
-    if (initialStatus === "DONE" && (hargaKalkulasi > 0 || kalRpSales > 0)) {
-        calculatedMhHargaKalkulasi =
-            kalPpn > 0
-                ? Math.round(kalRpSales * (1 + kalPpn / 100))
-                : kalRpSales;
-    }
-    const mhHargaKalkulasi = calculatedMhHargaKalkulasi;
-    // Pada tmintaharga, mh_nomor_kalkulasi dikhususkan untuk nomor kalkulasi Finance (KAL-...).
-    // Nomor kalkulasi Sales (KALS-...) tidak disimpan di tmintaharga.mh_nomor_kalkulasi, melainkan tetap di tkalkulasi_hdr (relasi kal_mh_nomor).
-    // Kolom tmintaharga.mh_nomor_kalkulasi bersifat NOT NULL di DB, sehingga harus berupa string kosong jika tidak ada nomor kalkulasi Finance.
-    const isNomorFinance = String(nomorKalkulasi || "").toUpperCase().startsWith("KAL-");
-    const mhNomorKalkulasi =
-        initialStatus === "DONE" && isNomorFinance && nomorKalkulasi
-            ? String(nomorKalkulasi).trim()
-            : "";
-    const mhDateKalkulasi = (initialStatus === "DONE" && isNomorFinance) ? (dateKalkulasi || null) : null;
+    // Pada tmintaharga, jika status DONE (khususnya Divisi 1 & 5 serta status DONE lainnya):
+    // Simpan harga permintaan sales ke kolom mh_harga_kalkulasi dan mh_harga,
+    // simpan nomor kalkulasi (termasuk kode KALS-...), tanggal kalkulasi (NOW), dan user_kalkulasi.
+    let finalMhHarga = 0;
+    let finalMhHargaKalkulasi = 0;
+    let finalMhNomorKalkulasi = "";
+    let finalMhDateKalkulasi = null;
+    let finalUserKalkulasi = "";
 
-    // Coba insert dengan kolom mh_workshop, fallback jika kolom belum ada di DB (ER_BAD_FIELD_ERROR)
+    if (initialStatus === "DONE") {
+        const hrgSales = hargaPengajuan > 0
+            ? hargaPengajuan
+            : (kalPpn > 0
+                ? Math.round(kalRpSales * (1 + kalPpn / 100))
+                : kalRpSales);
+        finalMhHarga = hrgSales;
+        finalMhHargaKalkulasi = hrgSales;
+        finalMhNomorKalkulasi = String(nomorKalkulasi || "").trim();
+        finalMhDateKalkulasi = dateKalkulasi || new Date();
+        finalUserKalkulasi = String(actor || "").trim().slice(0, 10);
+    } else {
+        finalMhHarga = 0;
+        finalMhHargaKalkulasi = 0;
+        const isNomorFinance = String(nomorKalkulasi || "").toUpperCase().startsWith("KAL-");
+        finalMhNomorKalkulasi = isNomorFinance && nomorKalkulasi ? String(nomorKalkulasi).trim() : "";
+        finalMhDateKalkulasi = isNomorFinance ? (dateKalkulasi || null) : null;
+        finalUserKalkulasi = "";
+    }
+
+    // Coba insert dengan kolom mh_workshop dan user_kalkulasi, fallback jika kolom belum ada di DB (ER_BAD_FIELD_ERROR)
     try {
         await conn.query(
             `
@@ -1271,8 +1281,9 @@ const createPermintaanHargaInTransaction = async ({
             mh_nama, mh_jmlorder, mh_harga, mh_budget, mh_dateorder, mh_kain,
             mh_panjang, mh_lebar, mh_ukuran, mh_gramasi, mh_finishing, mh_sublim,
             mh_ket, mh_warna, mh_workshop, mh_status, date_create, user_create,
-            mh_harga_kalkulasi, mh_ket_kalkulasi, mh_nomor_kalkulasi, mh_date_kalkulasi
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
+            mh_harga_kalkulasi, mh_ket_kalkulasi, mh_nomor_kalkulasi, mh_date_kalkulasi,
+            user_kalkulasi
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?)
         `,
             [
                 divisiNum,
@@ -1283,7 +1294,7 @@ const createPermintaanHargaInTransaction = async ({
                 salesKode,
                 String(payload.mh_nama || "").trim(),
                 toNumber(payload.mh_jmlorder, 0),
-                0, // mh_harga: simpan 0 (disimpan di tkalkulasi_hdr.kal_rpsales)
+                finalMhHarga,
                 toNumber(payload.mh_budget, 0),
                 payload.mh_dateorder
                     ? normalizeDate(payload.mh_dateorder)
@@ -1306,10 +1317,11 @@ const createPermintaanHargaInTransaction = async ({
                 workshopGarmen,
                 initialStatus,
                 actor,
-                0, // mh_harga_kalkulasi: simpan 0 (disimpan di tkalkulasi_hdr.kal_rpsistem),
+                finalMhHargaKalkulasi,
                 String(payload.mh_ket_kalkulasi || "").trim(),
-                mhNomorKalkulasi,
-                mhDateKalkulasi,
+                finalMhNomorKalkulasi,
+                finalMhDateKalkulasi,
+                finalUserKalkulasi,
             ],
         );
     } catch (e) {
@@ -1327,8 +1339,9 @@ const createPermintaanHargaInTransaction = async ({
             mh_nama, mh_jmlorder, mh_harga, mh_budget, mh_dateorder, mh_kain,
             mh_panjang, mh_lebar, mh_ukuran, mh_gramasi, mh_finishing, mh_sublim,
             mh_ket, mh_warna, mh_status, date_create, user_create,
-            mh_harga_kalkulasi, mh_ket_kalkulasi, mh_nomor_kalkulasi, mh_date_kalkulasi
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
+            mh_harga_kalkulasi, mh_ket_kalkulasi, mh_nomor_kalkulasi, mh_date_kalkulasi,
+            user_kalkulasi
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?)
         `,
                 [
                     divisiNum,
@@ -1339,7 +1352,7 @@ const createPermintaanHargaInTransaction = async ({
                     salesKode,
                     String(payload.mh_nama || "").trim(),
                     toNumber(payload.mh_jmlorder, 0),
-                    0, // mh_harga: simpan 0
+                    finalMhHarga,
                     toNumber(payload.mh_budget, 0),
                     payload.mh_dateorder
                         ? normalizeDate(payload.mh_dateorder)
@@ -1361,10 +1374,11 @@ const createPermintaanHargaInTransaction = async ({
                         .toUpperCase(),
                     initialStatus,
                     actor,
-                    0, // mh_harga_kalkulasi: simpan 0
+                    finalMhHargaKalkulasi,
                     String(payload.mh_ket_kalkulasi || "").trim(),
-                    mhNomorKalkulasi,
-                    mhDateKalkulasi,
+                    finalMhNomorKalkulasi,
+                    finalMhDateKalkulasi,
+                    finalUserKalkulasi,
                 ],
             );
         } else throw e;
@@ -2214,6 +2228,26 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
         }
     }
 
+    // Data kalkulasi untuk update tmintaharga jika status DONE
+    let updFinalMhHarga = toNumber(body.mh_harga !== undefined ? body.mh_harga : rows[0].mh_harga, 0);
+    let updFinalMhHargaKalkulasi = 0;
+    let updFinalMhNomorKalkulasi = existingNomorKal || "";
+    let updFinalMhDateKalkulasi = rows[0].mh_date_kalkulasi || null;
+    let updFinalUserKalkulasi = rows[0].user_kalkulasi || "";
+
+    const activeStatusForUpd = (typeof updNewStatus !== "undefined") ? updNewStatus : curStatus;
+    if (activeStatusForUpd === "DONE") {
+        const hrgSalesUpd = updHargaPengajuan > 0 ? updHargaPengajuan : updFinalMhHarga;
+        updFinalMhHarga = hrgSalesUpd;
+        updFinalMhHargaKalkulasi = hrgSalesUpd;
+        updFinalMhNomorKalkulasi = existingNomorKal || "";
+        updFinalMhDateKalkulasi = rows[0].mh_date_kalkulasi || new Date();
+        updFinalUserKalkulasi = String(actor || "").trim().slice(0, 10);
+    } else {
+        const isNomorFinanceUpd = String(existingNomorKal || "").toUpperCase().startsWith("KAL-");
+        updFinalMhNomorKalkulasi = isNomorFinanceUpd ? existingNomorKal : "";
+    }
+
     // workshop garmen untuk update (hanya divisi 4) - default MEDIUM (P01)
     let updWorkshop = null;
     let hasWorkshopColUpd = true;
@@ -2266,6 +2300,9 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             mh_warna = ?,
             mh_workshop = ?,
             mh_harga_kalkulasi = ?,
+            mh_nomor_kalkulasi = ?,
+            mh_date_kalkulasi = ?,
+            user_kalkulasi = ?,
             mh_ket_kalkulasi = ?,
             user_modified = ?,
             date_modified = NOW()
@@ -2279,7 +2316,7 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
                 updateSalesKode || String(rows[0].mh_sal_kode || "").trim(),
                 String(body.mh_nama || "").trim(),
                 toNumber(body.mh_jmlorder, 0),
-                0, // mh_harga: simpan 0
+                updFinalMhHarga,
                 toNumber(body.mh_budget, 0),
                 normalizeDate(body.mh_dateorder),
                 updateKain,
@@ -2298,7 +2335,10 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
                     .trim()
                     .toUpperCase(),
                 updWorkshop,
-                0, // mh_harga_kalkulasi: simpan 0,
+                updFinalMhHargaKalkulasi,
+                updFinalMhNomorKalkulasi,
+                updFinalMhDateKalkulasi,
+                updFinalUserKalkulasi,
                 String(body.mh_ket_kalkulasi || "").trim(),
                 actor,
                 nomor,
@@ -2329,6 +2369,9 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
             mh_ket = ?,
             mh_warna = ?,
             mh_harga_kalkulasi = ?,
+            mh_nomor_kalkulasi = ?,
+            mh_date_kalkulasi = ?,
+            user_kalkulasi = ?,
             mh_ket_kalkulasi = ?,
             user_modified = ?,
             date_modified = NOW()
@@ -2342,7 +2385,7 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
                 updateSalesKode || String(rows[0].mh_sal_kode || "").trim(),
                 String(body.mh_nama || "").trim(),
                 toNumber(body.mh_jmlorder, 0),
-                toNumber(body.mh_harga, 0),
+                updFinalMhHarga,
                 toNumber(body.mh_budget, 0),
                 normalizeDate(body.mh_dateorder),
                 updateKain,
@@ -2360,7 +2403,10 @@ const updatePermintaanHarga = async ({ nomor, body, user }) => {
                 )
                     .trim()
                     .toUpperCase(),
-                0, // mh_harga_kalkulasi: simpan 0,
+                updFinalMhHargaKalkulasi,
+                updFinalMhNomorKalkulasi,
+                updFinalMhDateKalkulasi,
+                updFinalUserKalkulasi,
                 String(body.mh_ket_kalkulasi || "").trim(),
                 actor,
                 nomor,
